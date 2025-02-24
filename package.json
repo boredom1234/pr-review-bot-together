@@ -1,7 +1,7 @@
 {
   "name": "pr-review-bot-together",
   "version": "1.0.0",
-  "description": "An automated PR review bot powered by Together AI that provides code review comments on GitHub pull requests",
+  "description": "AI-powered code review bot that automatically analyzes pull requests using Together AI's language models",
   "main": "lib/main.js",
   "author": "Ville Saukkonen",
   "license": "MIT",

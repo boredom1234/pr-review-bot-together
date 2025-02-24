@@ -1,5 +1,7 @@
 # PR Review Bot Together
 
+AI-powered code review bot that automatically analyzes pull requests using Together AI's language models.
+
 An automated code review bot that uses Together AI's LLMs to provide intelligent feedback on GitHub pull requests.
 
 ## Features

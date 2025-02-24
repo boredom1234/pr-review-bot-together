@@ -1,7 +1,7 @@
 {
-  "name": "open-ai-reviewer",
+  "name": "pr-review-bot-together",
   "version": "1.0.0",
-  "description": "Open AI powered code reviews",
+  "description": "An automated PR review bot powered by Together AI that provides code review comments on GitHub pull requests",
   "main": "lib/main.js",
   "author": "Ville Saukkonen",
   "license": "MIT",

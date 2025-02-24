@@ -357,13 +357,32 @@ async function getAIResponse(prompt: string): Promise<Array<{
       messages: [
         {
           role: "system",
+          content: "You are a code review assistant. Provide responses in JSON format only, without any markdown formatting or additional text.",
+        },
+        {
+          role: "user",
           content: prompt,
         },
       ],
     });
 
-    const res = response.choices[0].message?.content?.trim() || "{}";
-    return JSON.parse(res).reviews;
+    const content = response.choices[0].message?.content?.trim() || "{}";
+    // Remove any markdown formatting if present
+    const cleanJson = content.replace(/```[a-z]*\n|\n```/g, '').trim();
+    
+    try {
+      const parsed = JSON.parse(cleanJson);
+      return parsed.reviews || [];
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError);
+      // Attempt to extract JSON if wrapped in other text
+      const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const extracted = JSON.parse(jsonMatch[0]);
+        return extracted.reviews || [];
+      }
+      return null;
+    }
   } catch (error) {
     console.error("Error:", error);
     return null;

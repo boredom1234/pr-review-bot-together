@@ -19,4 +19,7 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
-          TOGETHER_API_MODEL: ${{ vars.TOGETHER_API_MODEL || 'togethercomputer/llama-2-70b-chat' }} 
+          TOGETHER_API_MODEL: ${{ vars.TOGETHER_API_MODEL || 'togethercomputer/llama-2-70b-chat' }}
+          exclude: "*.md,*.mdx,*.markdown,README.*"
+          max_tokens: None
+          temperature: 0.1 

@@ -1,0 +1,17 @@
+name: PR Review Bot
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run PR Review
+        uses: ./
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          TOGETHER_API_MODEL: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'  # or your preferred model
+          exclude: '*.md,*.txt'  # optional: files to exclude

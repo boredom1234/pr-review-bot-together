@@ -171,20 +171,25 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails, fileConten
   const fileExtension = file.to ? file.to.split('.').pop() || '' : '';
   const contextPrompt = fileContent ? `\nFull file content for context:\n\`\`\`${fileExtension}\n${fileContent}\n\`\`\`\n` : '';
   
-  return `Your task is to review pull requests. Instructions:
+  return `You are a strict code reviewer. Your task is to thoroughly analyze the code and find potential issues, bugs, and improvements. Instructions:
+
 - Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "severity": "<severity>"}]}
 - Severity levels:
-  - "critical": For issues that must be fixed (security issues, bugs, broken functionality)
-  - "warning": For code quality issues that should be addressed
-  - "suggestion": For optional improvements
-- Do not give positive comments or compliments.
-- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
-- Consider the full file context when making suggestions.
-- IMPORTANT: NEVER suggest adding comments to the code.
+  - "critical": For issues that must be fixed (security issues, bugs, broken functionality, performance issues)
+  - "warning": For code quality issues that should be addressed (maintainability, best practices, potential edge cases)
+  - "suggestion": For optional improvements (readability, minor optimizations)
+- Be thorough and strict in your review:
+  - Look for security vulnerabilities
+  - Check for potential bugs and edge cases
+  - Identify performance issues
+  - Verify error handling
+  - Check for code quality and maintainability issues
+- Do not give positive comments or compliments
+- Always try to find at least one issue to improve the code
+- Write the comment in GitHub Markdown format
+- Consider the full file context when making suggestions
 
-Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
+Review the following code diff in the file "${file.to}" and take the pull request title and description into account.
   
 Pull request title: ${prDetails.title}
 Pull request description:
@@ -212,11 +217,11 @@ async function getAIResponse(prompt: string): Promise<Array<{
 }> | null> {
   const queryConfig = {
     model: TOGETHER_API_MODEL,
-    temperature: 0.2,
+    temperature: 0.7,
     max_tokens: 700,
     top_p: 1,
     frequency_penalty: 0,
-    presence_penalty: 0,
+    presence_penalty: 0.1,
   };
 
   try {
@@ -225,16 +230,30 @@ async function getAIResponse(prompt: string): Promise<Array<{
       messages: [
         {
           role: "system",
+          content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review."
+        },
+        {
+          role: "user",
           content: prompt,
         },
       ],
     });
 
     const res = response.choices[0].message?.content?.trim() || "{}";
-    return JSON.parse(res).reviews;
+    try {
+      const parsed = JSON.parse(res);
+      if (!parsed.reviews || !Array.isArray(parsed.reviews)) {
+        console.warn("Invalid response format from AI");
+        return [];
+      }
+      return parsed.reviews;
+    } catch (parseError) {
+      console.error("Failed to parse AI response:", parseError);
+      return [];
+    }
   } catch (error) {
-    console.error("Error:", error);
-    return null;
+    console.error("Error getting AI response:", error);
+    return [];
   }
 }
 
@@ -271,9 +290,10 @@ async function createReviewComment(
     const warnings = comments.filter(c => c.severity === 'warning').length;
     const suggestions = comments.filter(c => c.severity === 'suggestion').length;
 
-    const event = criticalIssues > 0 ? "REQUEST_CHANGES" 
-                 : warnings > 0 ? "REQUEST_CHANGES"
-                 : "COMMENT";
+    // Always request changes if there are any issues
+    const event = (criticalIssues > 0 || warnings > 0) ? "REQUEST_CHANGES" 
+                 : suggestions > 0 ? "COMMENT"
+                 : "APPROVE";
 
     const summary = comments.length > 0 
       ? `### AI Code Review Summary
@@ -282,13 +302,13 @@ ${criticalIssues > 0 ? `- ❌ ${criticalIssues} critical issue${criticalIssues >
 ${warnings > 0 ? `- ⚠️ ${warnings} warning${warnings > 1 ? 's' : ''}\n` : ''}
 ${suggestions > 0 ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? 's' : ''}\n` : ''}
 
-${criticalIssues > 0 ? '\n⛔ Critical issues must be addressed before merging.' : ''}
-${warnings > 0 ? '\n⚠️ Please review and address the warnings before merging.' : ''}
-${suggestions > 0 ? '\n💡 Consider the suggestions for code improvement.' : ''}`
-      : "### ✅ AI Code Review Summary\nNo issues found. The code LGTM 😊!";
+${criticalIssues > 0 ? '\n⛔ BLOCKING: Critical issues must be addressed before merging.' : ''}
+${warnings > 0 ? '\n⚠️ BLOCKING: Please review and address all warnings before merging.' : ''}
+${suggestions > 0 ? '\n💡 Consider implementing the suggestions for code improvement.' : ''}`
+      : "### ✅ AI Code Review Summary\nNo issues found in this review.";
 
     const reviewComments: Array<GitHubComment> = comments.map(comment => ({
-      body: `[${comment.severity.toUpperCase()}] ${comment.body}`,
+      body: `${getSeverityEmoji(comment.severity)} [${comment.severity.toUpperCase()}] ${comment.body}`,
       path: comment.path,
       line: comment.line
     }));
@@ -308,6 +328,17 @@ ${suggestions > 0 ? '\n💡 Consider the suggestions for code improvement.' : ''
     } else {
       throw new Error('Failed to submit code review: Unknown error');
     }
+  }
+}
+
+function getSeverityEmoji(severity: 'critical' | 'warning' | 'suggestion'): string {
+  switch (severity) {
+    case 'critical':
+      return '❌';
+    case 'warning':
+      return '⚠️';
+    case 'suggestion':
+      return '💡';
   }
 }
 

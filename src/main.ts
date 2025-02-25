@@ -363,7 +363,7 @@ ${suggestions > 0 ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? 's' : '
 ${criticalIssues > 0 ? '\n⛔ Critical issues must be addressed before merging.' : ''}
 ${warnings > 0 ? '\n⚠️ Please review and address the warnings before merging.' : ''}
 ${suggestions > 0 ? '\n💡 Consider the suggestions for code improvement.' : ''}`
-      : "### ✅ AI Code Review Summary\nNo issues found. The code LGTM 😊!";
+      : "### ✅ AI Code Review Summary\nNo issues found. The code looks good!";
 
     const reviewComments: Array<GitHubComment> = comments.map(comment => ({
       body: `[${comment.severity.toUpperCase()}] ${comment.body}`,

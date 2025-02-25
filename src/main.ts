@@ -218,7 +218,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
   const queryConfig = {
     model: TOGETHER_API_MODEL,
     temperature: 0.7,
-    max_tokens: 700,
+    max_tokens: 8096,
     top_p: 1,
     frequency_penalty: 0,
     presence_penalty: 0.1,

@@ -77,26 +77,77 @@ function getPRDetails() {
         };
     });
 }
-function getDiff(owner, repo, pull_number) {
+function getFileContent(owner, repo, path, ref) {
     return __awaiter(this, void 0, void 0, function* () {
-        const response = yield octokit.pulls.get({
-            owner,
-            repo,
-            pull_number,
-            mediaType: { format: "diff" },
-        });
-        // @ts-expect-error - response.data is a string
-        return response.data;
+        try {
+            const response = yield octokit.repos.getContent({
+                owner,
+                repo,
+                path,
+                ref,
+            });
+            // Handle file content response
+            if ('content' in response.data && !Array.isArray(response.data)) {
+                return Buffer.from(response.data.content, 'base64').toString('utf8');
+            }
+            return null;
+        }
+        catch (error) {
+            console.error(`Error fetching file content: ${error}`);
+            return null;
+        }
     });
 }
-function analyzeCode(parsedDiff, prDetails) {
+function getDiff(owner, repo, pull_number) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const response = yield octokit.pulls.get({
+                owner,
+                repo,
+                pull_number,
+                mediaType: { format: "diff" },
+            });
+            // Get the PR details to access base and head SHAs
+            const prDetails = yield octokit.pulls.get({
+                owner,
+                repo,
+                pull_number,
+            });
+            const fileContexts = new Map();
+            // Parse the diff to get file paths
+            // @ts-expect-error - response.data is a string
+            const parsedDiff = (0, parse_diff_1.default)(response.data);
+            // Fetch full content for each modified file
+            for (const file of parsedDiff) {
+                if (file.to && file.to !== '/dev/null') {
+                    const fileContent = yield getFileContent(owner, repo, file.to, prDetails.data.head.sha);
+                    if (fileContent) {
+                        fileContexts.set(file.to, fileContent);
+                    }
+                }
+            }
+            return {
+                // @ts-expect-error - response.data is a string
+                diff: response.data,
+                fileContexts,
+            };
+        }
+        catch (error) {
+            console.error(`Error fetching diff: ${error}`);
+            return null;
+        }
+    });
+}
+function analyzeCode(parsedDiff, prDetails, fileContexts) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
         const comments = [];
         for (const file of parsedDiff) {
             if (file.to === "/dev/null")
                 continue; // Ignore deleted files
+            const fileContent = file.to ? (_a = fileContexts.get(file.to)) !== null && _a !== void 0 ? _a : null : null;
             for (const chunk of file.chunks) {
-                const prompt = createPrompt(file, chunk, prDetails);
+                const prompt = createPrompt(file, chunk, prDetails, fileContent);
                 const aiResponse = yield getAIResponse(prompt);
                 if (aiResponse) {
                     const newComments = createComment(file, chunk, aiResponse);
@@ -109,13 +160,16 @@ function analyzeCode(parsedDiff, prDetails) {
         return comments;
     });
 }
-function createPrompt(file, chunk, prDetails) {
+function createPrompt(file, chunk, prDetails, fileContent) {
+    const fileExtension = file.to ? file.to.split('.').pop() || '' : '';
+    const contextPrompt = fileContent ? `\nFull file content for context:\n\`\`\`${fileExtension}\n${fileContent}\n\`\`\`\n` : '';
     return `Your task is to review pull requests. Instructions:
 - Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 - Do not give positive comments or compliments.
 - Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
+- Consider the full file context when making suggestions.
 - IMPORTANT: NEVER suggest adding comments to the code.
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
@@ -126,7 +180,7 @@ Pull request description:
 ---
 ${prDetails.description}
 ---
-
+${contextPrompt}
 Git diff to review:
 
 \`\`\`diff
@@ -192,10 +246,10 @@ function main() {
     var _a;
     return __awaiter(this, void 0, void 0, function* () {
         const prDetails = yield getPRDetails();
-        let diff;
+        let diffResult;
         const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
         if (eventData.action === "opened") {
-            diff = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+            diffResult = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
         }
         else if (eventData.action === "synchronize") {
             const newBaseSha = eventData.before;
@@ -209,17 +263,31 @@ function main() {
                 base: newBaseSha,
                 head: newHeadSha,
             });
-            diff = String(response.data);
+            // Create a DiffWithContext object for the synchronize event
+            diffResult = {
+                diff: String(response.data),
+                fileContexts: new Map(), // We'll populate this with file contents
+            };
+            // Parse the diff to get file paths and fetch their contents
+            const parsedDiff = (0, parse_diff_1.default)(String(response.data));
+            for (const file of parsedDiff) {
+                if (file.to && file.to !== '/dev/null') {
+                    const fileContent = yield getFileContent(prDetails.owner, prDetails.repo, file.to, newHeadSha);
+                    if (fileContent) {
+                        diffResult.fileContexts.set(file.to, fileContent);
+                    }
+                }
+            }
         }
         else {
             console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
             return;
         }
-        if (!diff) {
+        if (!diffResult) {
             console.log("No diff found");
             return;
         }
-        const parsedDiff = (0, parse_diff_1.default)(diff);
+        const parsedDiff = (0, parse_diff_1.default)(diffResult.diff);
         const excludePatterns = core
             .getInput("exclude")
             .split(",")
@@ -227,7 +295,7 @@ function main() {
         const filteredDiff = parsedDiff.filter((file) => {
             return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
         });
-        const comments = yield analyzeCode(filteredDiff, prDetails);
+        const comments = yield analyzeCode(filteredDiff, prDetails, diffResult.fileContexts);
         if (comments.length > 0) {
             yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
         }

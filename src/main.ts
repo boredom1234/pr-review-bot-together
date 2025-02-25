@@ -4,6 +4,7 @@ import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
 import Together from "together-ai";
+import path from 'path';
 
 // Add at the top of your file for local development
 if (process.env.NODE_ENV !== "production") {
@@ -128,6 +129,176 @@ async function getDiff(
   }
 }
 
+function validateFileExtension(filePath: string, fileContent: string): ReviewComment | null {
+  const extension = path.extname(filePath).toLowerCase();
+  const content = fileContent.trim();
+
+  // Common language indicators
+  const indicators = {
+    python: {
+      extensions: ['.py', '.pyw'],
+      patterns: [
+        /^from\s+[\w.]+\s+import\s+/m,  // from ... import
+        /^import\s+[\w.]+/m,            // import statements
+        /^def\s+\w+\s*\(/m,             // function definitions
+        /^class\s+\w+[:(]/m,            // class definitions
+        /:$/m,                          // python blocks
+        /^\s*@\w+/m,                    // decorators
+      ]
+    },
+    javascript: {
+      extensions: ['.js', '.jsx', '.mjs'],
+      patterns: [
+        /^const\s+\w+\s*=/m,           // const declarations
+        /^let\s+\w+\s*=/m,             // let declarations
+        /^var\s+\w+\s*=/m,             // var declarations
+        /^function\s+\w+\s*\(/m,       // function declarations
+        /=>\s*{/m,                     // arrow functions
+        /^export\s+/m,                 // export statements
+        /^import\s+.*from/m,           // ES6 imports
+      ]
+    },
+    typescript: {
+      extensions: ['.ts', '.tsx'],
+      patterns: [
+        /^interface\s+\w+\s*{/m,       // interface declarations
+        /^type\s+\w+\s*=/m,            // type declarations
+        /^enum\s+\w+\s*{/m,            // enum declarations
+        /:\s*\w+[\[\]]*\s*[=;]/m,      // type annotations
+      ]
+    },
+    golang: {
+      extensions: ['.go'],
+      patterns: [
+        /^package\s+\w+/m,             // package declaration
+        /^import\s+[\s\S]*?\)/m,       // import blocks
+        /^func\s+\w+\s*\(/m,           // function declarations
+        /^type\s+\w+\s+struct\s*{/m,   // struct declarations
+        /^type\s+\w+\s+interface\s*{/m,// interface declarations
+        /:\=$/m,                       // short variable declarations
+      ]
+    },
+    c: {
+      extensions: ['.c', '.h'],
+      patterns: [
+        /^#include\s+[<"]/m,           // include statements
+        /^#define\s+\w+/m,             // macro definitions
+        /^typedef\s+struct\s*{/m,      // typedef struct
+        /^void\s+\w+\s*\(/m,           // void functions
+        /^int\s+\w+\s*\(/m,            // int functions
+        /^char\s+\w+\s*\(/m,           // char functions
+      ]
+    },
+    cpp: {
+      extensions: ['.cpp', '.hpp', '.cc', '.hh', '.cxx', '.hxx'],
+      patterns: [
+        /^#include\s+[<"]/m,           // include statements
+        /^namespace\s+\w+\s*{/m,       // namespace declarations
+        /^class\s+\w+\s*[:{]/m,        // class declarations
+        /^template\s*<.*>/m,           // template declarations
+        /^std::/m,                     // std namespace usage
+        /^public:|^private:|^protected:/m, // access specifiers
+      ]
+    },
+    java: {
+      extensions: ['.java'],
+      patterns: [
+        /^package\s+[\w.]+;/m,         // package declarations
+        /^import\s+[\w.]+;/m,          // import statements
+        /^public\s+class\s+\w+/m,      // public class
+        /^private\s+\w+\s+\w+/m,       // private fields
+        /^protected\s+\w+\s+\w+/m,     // protected fields
+        /@Override/m,                  // annotations
+      ]
+    },
+    rust: {
+      extensions: ['.rs'],
+      patterns: [
+        /^use\s+[\w:]+/m,             // use statements
+        /^fn\s+\w+/m,                 // function declarations
+        /^pub\s+fn/m,                 // public functions
+        /^struct\s+\w+/m,             // struct declarations
+        /^impl\s+\w+/m,               // impl blocks
+        /^mod\s+\w+/m,                // module declarations
+      ]
+    },
+    ruby: {
+      extensions: ['.rb', '.rake'],
+      patterns: [
+        /^require\s+[\'"]/m,          // require statements
+        /^class\s+\w+\s*(<\s*\w+)?/m, // class declarations
+        /^def\s+\w+/m,                // method definitions
+        /^module\s+\w+/m,             // module declarations
+        /^attr_/m,                    // attribute macros
+        /^private$|^protected$/m,      // access modifiers
+      ]
+    },
+    swift: {
+      extensions: ['.swift'],
+      patterns: [
+        /^import\s+\w+/m,             // import statements
+        /^class\s+\w+/m,              // class declarations
+        /^struct\s+\w+/m,             // struct declarations
+        /^protocol\s+\w+/m,           // protocol declarations
+        /^extension\s+\w+/m,          // extensions
+        /^@objc/m,                    // objective-c interop
+      ]
+    },
+    kotlin: {
+      extensions: ['.kt', '.kts'],
+      patterns: [
+        /^package\s+[\w.]+/m,         // package declarations
+        /^import\s+[\w.]+/m,          // import statements
+        /^fun\s+\w+/m,                // function declarations
+        /^class\s+\w+/m,              // class declarations
+        /^data\s+class/m,             // data classes
+        /^@\w+/m,                     // annotations
+      ]
+    },
+    php: {
+      extensions: ['.php'],
+      patterns: [
+        /^<\?php/m,                   // PHP opening tag
+        /^namespace\s+[\w\\]+;/m,     // namespace declarations
+        /^use\s+[\w\\]+;/m,          // use statements
+        /^class\s+\w+/m,              // class declarations
+        /^public\s+function/m,        // public methods
+        /^\$\w+\s*=/m,               // variable assignments
+      ]
+    }
+  };
+
+  // Detect the likely language based on content
+  let detectedLanguage = null;
+  let maxMatches = 0;
+
+  for (const [lang, config] of Object.entries(indicators)) {
+    const matches = config.patterns.reduce((count, pattern) => 
+      count + (pattern.test(content) ? 1 : 0), 0);
+    if (matches > maxMatches) {
+      maxMatches = matches;
+      detectedLanguage = lang;
+    }
+  }
+
+  if (!detectedLanguage || maxMatches < 2) { // Require at least 2 matches for confidence
+    return null; // Can't determine the language with confidence
+  }
+
+  // Check if the file extension matches the detected language
+  const validExtensions = indicators[detectedLanguage as keyof typeof indicators].extensions;
+  if (!validExtensions.includes(extension)) {
+    return {
+      body: `⚠️ File extension mismatch: This appears to be ${detectedLanguage} code but has a '${extension}' extension. Consider renaming to '${validExtensions[0]}'`,
+      path: filePath,
+      line: 1,
+      severity: 'critical'
+    };
+  }
+
+  return null;
+}
+
 async function analyzeCode(
   parsedDiff: File[],
   prDetails: PRDetails,
@@ -139,6 +310,14 @@ async function analyzeCode(
     if (file.to === "/dev/null") continue; // Ignore deleted files
 
     const fileContent = file.to ? fileContexts.get(file.to) ?? null : null;
+
+    // Add extension validation
+    if (file.to && fileContent) {
+      const extensionError = validateFileExtension(file.to, fileContent);
+      if (extensionError) {
+        comments.push(extensionError);
+      }
+    }
 
     for (const chunk of file.chunks) {
       const prompt = createPrompt(file, chunk, prDetails, fileContent);

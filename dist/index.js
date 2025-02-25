@@ -48,6 +48,7 @@ const rest_1 = __nccwpck_require__(5375);
 const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
 const together_ai_1 = __importDefault(__nccwpck_require__(7598));
+const path_1 = __importDefault(__nccwpck_require__(1017));
 // Add at the top of your file for local development
 if (process.env.NODE_ENV !== "production") {
     (__nccwpck_require__(2437).config)();
@@ -138,6 +139,168 @@ function getDiff(owner, repo, pull_number) {
         }
     });
 }
+function validateFileExtension(filePath, fileContent) {
+    const extension = path_1.default.extname(filePath).toLowerCase();
+    const content = fileContent.trim();
+    // Common language indicators
+    const indicators = {
+        python: {
+            extensions: ['.py', '.pyw'],
+            patterns: [
+                /^from\s+[\w.]+\s+import\s+/m,
+                /^import\s+[\w.]+/m,
+                /^def\s+\w+\s*\(/m,
+                /^class\s+\w+[:(]/m,
+                /:$/m,
+                /^\s*@\w+/m, // decorators
+            ]
+        },
+        javascript: {
+            extensions: ['.js', '.jsx', '.mjs'],
+            patterns: [
+                /^const\s+\w+\s*=/m,
+                /^let\s+\w+\s*=/m,
+                /^var\s+\w+\s*=/m,
+                /^function\s+\w+\s*\(/m,
+                /=>\s*{/m,
+                /^export\s+/m,
+                /^import\s+.*from/m, // ES6 imports
+            ]
+        },
+        typescript: {
+            extensions: ['.ts', '.tsx'],
+            patterns: [
+                /^interface\s+\w+\s*{/m,
+                /^type\s+\w+\s*=/m,
+                /^enum\s+\w+\s*{/m,
+                /:\s*\w+[\[\]]*\s*[=;]/m, // type annotations
+            ]
+        },
+        golang: {
+            extensions: ['.go'],
+            patterns: [
+                /^package\s+\w+/m,
+                /^import\s+[\s\S]*?\)/m,
+                /^func\s+\w+\s*\(/m,
+                /^type\s+\w+\s+struct\s*{/m,
+                /^type\s+\w+\s+interface\s*{/m,
+                /:\=$/m, // short variable declarations
+            ]
+        },
+        c: {
+            extensions: ['.c', '.h'],
+            patterns: [
+                /^#include\s+[<"]/m,
+                /^#define\s+\w+/m,
+                /^typedef\s+struct\s*{/m,
+                /^void\s+\w+\s*\(/m,
+                /^int\s+\w+\s*\(/m,
+                /^char\s+\w+\s*\(/m, // char functions
+            ]
+        },
+        cpp: {
+            extensions: ['.cpp', '.hpp', '.cc', '.hh', '.cxx', '.hxx'],
+            patterns: [
+                /^#include\s+[<"]/m,
+                /^namespace\s+\w+\s*{/m,
+                /^class\s+\w+\s*[:{]/m,
+                /^template\s*<.*>/m,
+                /^std::/m,
+                /^public:|^private:|^protected:/m, // access specifiers
+            ]
+        },
+        java: {
+            extensions: ['.java'],
+            patterns: [
+                /^package\s+[\w.]+;/m,
+                /^import\s+[\w.]+;/m,
+                /^public\s+class\s+\w+/m,
+                /^private\s+\w+\s+\w+/m,
+                /^protected\s+\w+\s+\w+/m,
+                /@Override/m, // annotations
+            ]
+        },
+        rust: {
+            extensions: ['.rs'],
+            patterns: [
+                /^use\s+[\w:]+/m,
+                /^fn\s+\w+/m,
+                /^pub\s+fn/m,
+                /^struct\s+\w+/m,
+                /^impl\s+\w+/m,
+                /^mod\s+\w+/m, // module declarations
+            ]
+        },
+        ruby: {
+            extensions: ['.rb', '.rake'],
+            patterns: [
+                /^require\s+[\'"]/m,
+                /^class\s+\w+\s*(<\s*\w+)?/m,
+                /^def\s+\w+/m,
+                /^module\s+\w+/m,
+                /^attr_/m,
+                /^private$|^protected$/m, // access modifiers
+            ]
+        },
+        swift: {
+            extensions: ['.swift'],
+            patterns: [
+                /^import\s+\w+/m,
+                /^class\s+\w+/m,
+                /^struct\s+\w+/m,
+                /^protocol\s+\w+/m,
+                /^extension\s+\w+/m,
+                /^@objc/m, // objective-c interop
+            ]
+        },
+        kotlin: {
+            extensions: ['.kt', '.kts'],
+            patterns: [
+                /^package\s+[\w.]+/m,
+                /^import\s+[\w.]+/m,
+                /^fun\s+\w+/m,
+                /^class\s+\w+/m,
+                /^data\s+class/m,
+                /^@\w+/m, // annotations
+            ]
+        },
+        php: {
+            extensions: ['.php'],
+            patterns: [
+                /^<\?php/m,
+                /^namespace\s+[\w\\]+;/m,
+                /^use\s+[\w\\]+;/m,
+                /^class\s+\w+/m,
+                /^public\s+function/m,
+                /^\$\w+\s*=/m, // variable assignments
+            ]
+        }
+    };
+    // Detect the likely language based on content
+    let detectedLanguage = null;
+    let maxMatches = 0;
+    for (const [lang, config] of Object.entries(indicators)) {
+        const matches = config.patterns.reduce((count, pattern) => count + (pattern.test(content) ? 1 : 0), 0);
+        if (matches > maxMatches) {
+            maxMatches = matches;
+            detectedLanguage = lang;
+        }
+    }
+    if (!detectedLanguage || maxMatches < 2) { // Require at least 2 matches for confidence
+        return null; // Can't determine the language with confidence
+    }
+    // Check if the file extension matches the detected language
+    const validExtensions = indicators[detectedLanguage].extensions;
+    if (!validExtensions.includes(extension)) {
+        return {
+            body: `⚠️ File extension mismatch: This appears to be ${detectedLanguage} code but has a '${extension}' extension. Consider renaming to '${validExtensions[0]}'`,
+            path: filePath,
+            line: 1,
+            severity: 'critical'
+        };
+    }
+    return null;
+}
 function analyzeCode(parsedDiff, prDetails, fileContexts) {
     var _a;
     return __awaiter(this, void 0, void 0, function* () {
@@ -146,6 +309,13 @@ function analyzeCode(parsedDiff, prDetails, fileContexts) {
             if (file.to === "/dev/null")
                 continue; // Ignore deleted files
             const fileContent = file.to ? (_a = fileContexts.get(file.to)) !== null && _a !== void 0 ? _a : null : null;
+            // Add extension validation
+            if (file.to && fileContent) {
+                const extensionError = validateFileExtension(file.to, fileContent);
+                if (extensionError) {
+                    comments.push(extensionError);
+                }
+            }
             for (const chunk of file.chunks) {
                 const prompt = createPrompt(file, chunk, prDetails, fileContent);
                 const aiResponse = yield getAIResponse(prompt);

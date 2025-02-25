@@ -1,5 +1,11 @@
 name: "AI Code Review Action"
-description: "Perform code reviews and comment on diffs using TogetherAI API."
+description: "Perform code reviews and comment on diffs using TogetherAI API.
+  Available models:
+  # meta-llama/Llama-3.3-70B-Instruct-Turbo                        $0.88
+  # meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo-128K               $0.18
+  # deepseek-ai/DeepSeek-V3                                        $1.25
+  # deepseek-ai/DeepSeek-R1                                        $3.00 / $7.00
+  # meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo                  $3.50"
 inputs:
   GITHUB_TOKEN:
     description: "GitHub token to interact with the repository."
@@ -8,13 +14,13 @@ inputs:
     description: "TogetherAI API key for LLM access."
     required: true
   TOGETHER_API_MODEL:
-    description: "TogetherAI model name (e.g., mistral-7b-instruct, llama2-70b-chat)."
+    description: "TogetherAI model name (e.g., meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo, deepseek-ai/DeepSeek-V3)."
     required: false
-    default: "mistral-7b-instruct"
+    default: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
   exclude:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
-    default: ""
+    default: "*.md,*.txt"
 runs:
   using: "node16"
   main: "dist/index.js"

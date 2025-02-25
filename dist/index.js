@@ -138,32 +138,89 @@ function getDiff(owner, repo, pull_number) {
         }
     });
 }
-function analyzeCode(parsedDiff, prDetails, fileContexts) {
-    var _a;
+function getRelevantPRHistory(owner, repo, currentPR, currentFiles) {
     return __awaiter(this, void 0, void 0, function* () {
-        const comments = [];
-        for (const file of parsedDiff) {
-            if (file.to === "/dev/null")
-                continue; // Ignore deleted files
-            const fileContent = file.to ? (_a = fileContexts.get(file.to)) !== null && _a !== void 0 ? _a : null : null;
-            for (const chunk of file.chunks) {
-                const prompt = createPrompt(file, chunk, prDetails, fileContent);
-                const aiResponse = yield getAIResponse(prompt);
-                if (aiResponse) {
-                    const newComments = createComment(file, chunk, aiResponse);
-                    if (newComments) {
-                        comments.push(...newComments);
-                    }
+        try {
+            // Get last 20 closed PRs
+            const { data: pullRequests } = yield octokit.pulls.list({
+                owner,
+                repo,
+                state: 'closed',
+                sort: 'updated',
+                direction: 'desc',
+                per_page: 20
+            });
+            const relevantPRs = [];
+            for (const pr of pullRequests) {
+                if (pr.number === currentPR.pull_number)
+                    continue;
+                // Get files changed in this PR
+                const { data: files } = yield octokit.pulls.listFiles({
+                    owner,
+                    repo,
+                    pull_number: pr.number
+                });
+                const prFiles = files.map(f => f.filename);
+                // Check if this PR modified any of the same files or directories
+                const similarFiles = prFiles.filter(file => currentFiles.some(currentFile => {
+                    // Check exact file match
+                    if (currentFile === file)
+                        return true;
+                    // Check directory match
+                    const currentDir = currentFile.split('/').slice(0, -1).join('/');
+                    const historicalDir = file.split('/').slice(0, -1).join('/');
+                    return currentDir === historicalDir;
+                }));
+                if (similarFiles.length > 0) {
+                    // Get review comments for this PR
+                    const { data: comments } = yield octokit.pulls.listReviewComments({
+                        owner,
+                        repo,
+                        pull_number: pr.number
+                    });
+                    relevantPRs.push({
+                        number: pr.number,
+                        title: pr.title,
+                        body: pr.body || '',
+                        files_changed: prFiles,
+                        similar_files: similarFiles,
+                        review_comments: comments.map(comment => ({
+                            path: comment.path,
+                            body: comment.body,
+                            line: comment.line || 0
+                        }))
+                    });
                 }
             }
+            return relevantPRs;
         }
-        return comments;
+        catch (error) {
+            console.error('Error fetching PR history:', error);
+            return [];
+        }
     });
 }
-function createPrompt(file, chunk, prDetails, fileContent) {
+function enhancePromptWithHistory(basePrompt, historicalPRs, currentFile) {
+    if (historicalPRs.length === 0)
+        return basePrompt;
+    const relevantComments = historicalPRs.flatMap(pr => pr.review_comments.filter(comment => comment.path === currentFile ||
+        comment.path.split('/').slice(0, -1).join('/') === currentFile.split('/').slice(0, -1).join('/')));
+    if (relevantComments.length === 0)
+        return basePrompt;
+    const historicalContext = `
+Historical Context:
+Previous reviews of similar files have raised these points:
+${relevantComments.map(comment => `- ${comment.body.split('\n')[0]}`).join('\n')}
+
+Please consider this historical context when reviewing, and maintain consistency with previous feedback where applicable.
+
+`;
+    return historicalContext + basePrompt;
+}
+function createPrompt(file, chunk, prDetails, fileContent, historicalPRs = []) {
     const fileExtension = file.to ? file.to.split('.').pop() || '' : '';
     const contextPrompt = fileContent ? `\nFull file content for context:\n\`\`\`${fileExtension}\n${fileContent}\n\`\`\`\n` : '';
-    return `Your task is to review pull requests. Instructions:
+    const basePrompt = `Your task is to review pull requests. Instructions:
 - Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "severity": "<severity>"}]}
 - Severity levels:
   - "critical": For issues that must be fixed (security issues, bugs, broken functionality)
@@ -175,6 +232,7 @@ function createPrompt(file, chunk, prDetails, fileContent) {
 - Use the given description only for the overall context and only comment the code.
 - Consider the full file context when making suggestions.
 - IMPORTANT: NEVER suggest adding comments to the code.
+- Maintain consistency with previous review feedback where applicable.
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
   
@@ -195,6 +253,7 @@ ${chunk.changes
         .join("\n")}
 \`\`\`
 `;
+    return enhancePromptWithHistory(basePrompt, historicalPRs, file.to || '');
 }
 function getAIResponse(prompt) {
     var _a, _b;
@@ -279,6 +338,31 @@ ${suggestions > 0 ? '\n💡 Consider the suggestions for code improvement.' : ''
                 throw new Error('Failed to submit code review: Unknown error');
             }
         }
+    });
+}
+function analyzeCode(parsedDiff, prDetails, fileContexts) {
+    var _a;
+    return __awaiter(this, void 0, void 0, function* () {
+        const comments = [];
+        // Get historical context
+        const currentFiles = parsedDiff.map(file => file.to).filter((file) => !!file);
+        const historicalPRs = yield getRelevantPRHistory(prDetails.owner, prDetails.repo, prDetails, currentFiles);
+        for (const file of parsedDiff) {
+            if (file.to === "/dev/null")
+                continue; // Ignore deleted files
+            const fileContent = file.to ? (_a = fileContexts.get(file.to)) !== null && _a !== void 0 ? _a : null : null;
+            for (const chunk of file.chunks) {
+                const prompt = createPrompt(file, chunk, prDetails, fileContent, historicalPRs);
+                const aiResponse = yield getAIResponse(prompt);
+                if (aiResponse) {
+                    const newComments = createComment(file, chunk, aiResponse);
+                    if (newComments) {
+                        comments.push(...newComments);
+                    }
+                }
+            }
+        }
+        return comments;
     });
 }
 function main() {

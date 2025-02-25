@@ -28,6 +28,19 @@ interface PRDetails {
   description: string;
 }
 
+interface HistoricalPR {
+  number: number;
+  title: string;
+  body: string;
+  files_changed: string[];
+  similar_files: string[];
+  review_comments: Array<{
+    path: string;
+    body: string;
+    line: number;
+  }>;
+}
+
 async function getPRDetails(): Promise<PRDetails> {
   const { repository, number } = JSON.parse(
     readFileSync(process.env.GITHUB_EVENT_PATH || "", "utf8")
@@ -128,50 +141,112 @@ async function getDiff(
   }
 }
 
-async function analyzeCode(
-  parsedDiff: File[],
-  prDetails: PRDetails,
-  fileContexts: Map<string, string>
-): Promise<Array<ReviewComment>> {
-  const comments: Array<ReviewComment> = [];
+async function getRelevantPRHistory(
+  owner: string,
+  repo: string,
+  currentPR: PRDetails,
+  currentFiles: string[]
+): Promise<HistoricalPR[]> {
+  try {
+    // Get last 20 closed PRs
+    const { data: pullRequests } = await octokit.pulls.list({
+      owner,
+      repo,
+      state: 'closed',
+      sort: 'updated',
+      direction: 'desc',
+      per_page: 20
+    });
 
-  for (const file of parsedDiff) {
-    if (file.to === "/dev/null") continue; // Ignore deleted files
-    
-    const fileContent = file.to ? fileContexts.get(file.to) ?? null : null;
-    
-    for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails, fileContent);
-      const aiResponse = await getAIResponse(prompt);
-      if (aiResponse) {
-        const newComments = createComment(file, chunk, aiResponse);
-        if (newComments) {
-          comments.push(...newComments);
-        }
+    const relevantPRs: HistoricalPR[] = [];
+
+    for (const pr of pullRequests) {
+      if (pr.number === currentPR.pull_number) continue;
+
+      // Get files changed in this PR
+      const { data: files } = await octokit.pulls.listFiles({
+        owner,
+        repo,
+        pull_number: pr.number
+      });
+
+      const prFiles = files.map(f => f.filename);
+      
+      // Check if this PR modified any of the same files or directories
+      const similarFiles = prFiles.filter(file => 
+        currentFiles.some(currentFile => {
+          // Check exact file match
+          if (currentFile === file) return true;
+          // Check directory match
+          const currentDir = currentFile.split('/').slice(0, -1).join('/');
+          const historicalDir = file.split('/').slice(0, -1).join('/');
+          return currentDir === historicalDir;
+        })
+      );
+
+      if (similarFiles.length > 0) {
+        // Get review comments for this PR
+        const { data: comments } = await octokit.pulls.listReviewComments({
+          owner,
+          repo,
+          pull_number: pr.number
+        });
+
+        relevantPRs.push({
+          number: pr.number,
+          title: pr.title,
+          body: pr.body || '',
+          files_changed: prFiles,
+          similar_files: similarFiles,
+          review_comments: comments.map(comment => ({
+            path: comment.path,
+            body: comment.body,
+            line: comment.line || 0
+          }))
+        });
       }
     }
+
+    return relevantPRs;
+  } catch (error) {
+    console.error('Error fetching PR history:', error);
+    return [];
   }
-  return comments;
 }
 
-interface ReviewComment {
-  body: string;
-  path: string;
-  line: number;
-  severity: 'critical' | 'warning' | 'suggestion';
+function enhancePromptWithHistory(
+  basePrompt: string,
+  historicalPRs: HistoricalPR[],
+  currentFile: string
+): string {
+  if (historicalPRs.length === 0) return basePrompt;
+
+  const relevantComments = historicalPRs.flatMap(pr => 
+    pr.review_comments.filter(comment => 
+      comment.path === currentFile || 
+      comment.path.split('/').slice(0, -1).join('/') === currentFile.split('/').slice(0, -1).join('/')
+    )
+  );
+
+  if (relevantComments.length === 0) return basePrompt;
+
+  const historicalContext = `
+Historical Context:
+Previous reviews of similar files have raised these points:
+${relevantComments.map(comment => `- ${comment.body.split('\n')[0]}`).join('\n')}
+
+Please consider this historical context when reviewing, and maintain consistency with previous feedback where applicable.
+
+`;
+
+  return historicalContext + basePrompt;
 }
 
-interface GitHubComment {
-  body: string;
-  path: string;
-  line: number;
-}
-
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails, fileContent: string | null): string {
+function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails, fileContent: string | null, historicalPRs: HistoricalPR[] = []): string {
   const fileExtension = file.to ? file.to.split('.').pop() || '' : '';
   const contextPrompt = fileContent ? `\nFull file content for context:\n\`\`\`${fileExtension}\n${fileContent}\n\`\`\`\n` : '';
   
-  return `Your task is to review pull requests. Instructions:
+  const basePrompt = `Your task is to review pull requests. Instructions:
 - Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "severity": "<severity>"}]}
 - Severity levels:
   - "critical": For issues that must be fixed (security issues, bugs, broken functionality)
@@ -183,6 +258,7 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails, fileConten
 - Use the given description only for the overall context and only comment the code.
 - Consider the full file context when making suggestions.
 - IMPORTANT: NEVER suggest adding comments to the code.
+- Maintain consistency with previous review feedback where applicable.
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
   
@@ -203,6 +279,8 @@ ${chunk.changes
   .join("\n")}
 \`\`\`
 `;
+
+  return enhancePromptWithHistory(basePrompt, historicalPRs, file.to || '');
 }
 
 async function getAIResponse(prompt: string): Promise<Array<{
@@ -309,6 +387,54 @@ ${suggestions > 0 ? '\n💡 Consider the suggestions for code improvement.' : ''
       throw new Error('Failed to submit code review: Unknown error');
     }
   }
+}
+
+async function analyzeCode(
+  parsedDiff: File[],
+  prDetails: PRDetails,
+  fileContexts: Map<string, string>
+): Promise<Array<ReviewComment>> {
+  const comments: Array<ReviewComment> = [];
+
+  // Get historical context
+  const currentFiles = parsedDiff.map(file => file.to).filter((file): file is string => !!file);
+  const historicalPRs = await getRelevantPRHistory(
+    prDetails.owner,
+    prDetails.repo,
+    prDetails,
+    currentFiles
+  );
+
+  for (const file of parsedDiff) {
+    if (file.to === "/dev/null") continue; // Ignore deleted files
+    
+    const fileContent = file.to ? fileContexts.get(file.to) ?? null : null;
+    
+    for (const chunk of file.chunks) {
+      const prompt = createPrompt(file, chunk, prDetails, fileContent, historicalPRs);
+      const aiResponse = await getAIResponse(prompt);
+      if (aiResponse) {
+        const newComments = createComment(file, chunk, aiResponse);
+        if (newComments) {
+          comments.push(...newComments);
+        }
+      }
+    }
+  }
+  return comments;
+}
+
+interface ReviewComment {
+  body: string;
+  path: string;
+  line: number;
+  severity: 'critical' | 'warning' | 'suggestion';
+}
+
+interface GitHubComment {
+  body: string;
+  path: string;
+  line: number;
 }
 
 async function main() {

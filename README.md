@@ -2,15 +2,18 @@
 
 AI-powered code review bot that automatically analyzes pull requests using Together AI's language models.
 
-An automated code review bot that uses Together AI's LLMs to provide intelligent feedback on GitHub pull requests.
-
 ## Features
 
 - 🤖 Automated code review comments on pull requests
-- 🔍 Analyzes code changes and suggests improvements
-- 🚀 Powered by Together AI's LLMs (Meta-Llama-3.1-8B-Instruct-Turbo)
-- ⚡ Runs on GitHub Actions
+- 🔍 Three-level severity analysis:
+  - ❌ Critical: Security issues, bugs, broken functionality, performance issues
+  - ⚠️ Warning: Code quality, maintainability, best practices, potential edge cases
+  - 💡 Suggestion: Readability improvements, minor optimizations
+- 🚫 Automatic PR blocking for critical issues and warnings
+- 📊 Detailed review summary with issue counts
 - 🔒 Secure handling of API keys and tokens
+- ⚡ Runs on GitHub Actions
+- 📝 Full file context analysis for better suggestions
 - 🎯 Configurable file exclusions
 
 ## Setup
@@ -40,6 +43,19 @@ An automated code review bot that uses Together AI's LLMs to provide intelligent
              exclude: '*.md,*.txt'
    ```
 
+## Review Behavior
+
+The bot will:
+1. Analyze each changed file in the PR
+2. Provide detailed comments with severity levels
+3. Generate a summary report with:
+   - Count of issues by severity
+   - Clear indicators for blocking issues
+   - Recommendations for next steps
+4. Automatically fail the GitHub Action if:
+   - Any critical issues are found
+   - Any warnings are detected
+
 ## Local Development
 
 1. Clone the repository
@@ -63,9 +79,12 @@ An automated code review bot that uses Together AI's LLMs to provide intelligent
 
 ## Configuration
 
-- `TOGETHER_API_MODEL`: Choose your preferred Together AI model
-- `exclude`: Comma-separated list of file patterns to exclude from review
-- Additional configuration options can be set in the workflow file
+The action can be configured with the following inputs:
+
+- `GITHUB_TOKEN`: Required. Used for GitHub API operations
+- `TOGETHER_API_KEY`: Required. Your Together AI API key
+- `TOGETHER_API_MODEL`: Required. The Together AI model to use (default: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo')
+- `exclude`: Optional. Comma-separated list of glob patterns for files to exclude from review
 
 ## Contributing
 

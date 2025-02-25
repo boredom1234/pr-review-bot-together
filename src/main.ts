@@ -273,12 +273,56 @@ function createComment(
     if (!file.to) {
       return [];
     }
-    return {
+
+    // Convert lineNumber to number
+    const lineNum = Number(aiResponse.lineNumber);
+
+    // Check if the line number is within any of the changed chunks
+    const isLineInDiff = chunk.changes.some(change => {
+      if ('add' === change.type) {
+        return change.ln === lineNum;
+      }
+      if ('normal' === change.type) {
+        return change.ln2 === lineNum;
+      }
+      return false;
+    });
+
+    if (!isLineInDiff) {
+      // If the line is not in diff, try to find the closest changed line
+      const changedLines = chunk.changes
+        .filter(change => change.type === 'add' || change.type === 'normal')
+        .map(change => {
+          if (change.type === 'add') return change.ln;
+          if (change.type === 'normal') return change.ln2;
+          return undefined;
+        })
+        .filter((ln): ln is number => ln !== undefined)
+        .sort((a, b) => a - b);
+
+      if (changedLines.length === 0) {
+        return [];
+      }
+
+      // Find the closest line number in the diff
+      const closestLine = changedLines.reduce((prev, curr) => 
+        Math.abs(curr - lineNum) < Math.abs(prev - lineNum) ? curr : prev
+      );
+
+      return [{
+        body: `[Original comment was for line ${lineNum}]\n${aiResponse.reviewComment}`,
+        path: file.to,
+        line: closestLine,
+        severity: aiResponse.severity || 'warning'
+      }];
+    }
+
+    return [{
       body: aiResponse.reviewComment,
       path: file.to,
-      line: Number(aiResponse.lineNumber),
+      line: lineNum,
       severity: aiResponse.severity || 'warning'
-    };
+    }];
   });
 }
 

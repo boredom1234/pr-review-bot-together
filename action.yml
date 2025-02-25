@@ -21,6 +21,18 @@ inputs:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
     default: "*.md,*.txt"
+  enable_quality_metrics:
+    description: "Enable code quality metrics analysis"
+    required: false
+    default: "true"
+  quality_tools:
+    description: "Comma-separated list of quality tools to run (eslint,pylint,etc)"
+    required: false
+    default: "auto"
+  fail_on_quality_issues:
+    description: "Fail the action if quality issues are found"
+    required: false
+    default: "false"
 runs:
   using: "node16"
   main: "dist/index.js"

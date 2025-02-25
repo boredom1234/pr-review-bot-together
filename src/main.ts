@@ -347,6 +347,7 @@ interface ReviewComment {
   severity: "critical" | "warning" | "suggestion";
   id?: string; // Unique identifier for tracking
   status?: "active" | "resolved" | "outdated"; // Track comment status
+  source?: "ai" | "quality-tool"; // Source of the comment
 }
 
 interface HistoricalReviewComment extends ReviewComment {

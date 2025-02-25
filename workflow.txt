@@ -1,0 +1,102 @@
+┌─────────────────────────────────────┐
+│           Pull Request              │
+│      Opened or Synchronized         │
+└───────────────────┬─────────────────┘
+                    ▼
+┌─────────────────────────────────────┐
+│        GitHub Action Triggered      │
+└───────────────────┬─────────────────┘
+                    ▼
+┌─────────────────────────────────────┐
+│       Load Action Configuration     │
+│  • GITHUB_TOKEN                     │
+│  • TOGETHER_API_KEY                 │
+│  • TOGETHER_API_MODEL               │
+│  • exclude patterns                 │
+│  • enable_quality_metrics           │
+│  • quality_tools                    │
+│  • fail_on_quality_issues           │
+└───────────────────┬─────────────────┘
+                    ▼
+┌─────────────────────────────────────┐
+│         Fetch PR Information        │
+│  • PR details                       │
+│  • Diff content                     │
+│  • Changed files                    │
+│  • Historical reviews               │
+└─────────┬─────────────────┬─────────┘
+          │                 │
+          ▼                 ▼
+┌─────────────────┐ ┌───────────────────────── ┐
+│  AI Code Review │ │ Quality Metrics Analysis │
+│  (Together AI)  │ │                          │
+└────────┬────────┘ └────────────┬─────────────┘
+         │                       │
+         │                       ▼
+         │          ┌─────────────────────────┐
+         │          │    Tool Detection       │
+         │          │  (if set to "auto")     │
+         │          └────────────┬────────────┘
+         │                       │
+         │                       ▼
+         │          ┌─────────────────────────┐
+         │          │    Run Quality Tools    │
+         │          │ ┌───────────────────┐   │
+         │          │ │      ESLint       │   │
+         │          │ │  (JS/TS files)    │   │
+         │          │ └───────────────────┘   │
+         │          │ ┌───────────────────┐   │
+         │          │ │      Pylint       │   │
+         │          │ │   (Python files)  │   │
+         │          │ └───────────────────┘   │
+         │          │ ┌───────────────────┐   │
+         │          │ │    Other tools    │   │
+         │          │ │  (as configured)  │   │
+         │          │ └───────────────────┘   │
+         │          └────────────┬────────────┘
+         │                       │
+         │                       ▼
+         │          ┌─────────────────────────┐
+         │          │  Process Tool Results   │
+         │          │ • Convert to comments   │
+         │          │ • Extract metrics       │
+         │          └────────────┬────────────┘
+         │                       │
+         ▼                       ▼
+┌────────────────────────────────────────────┐
+│           Combine Results                  │
+│  • AI-generated review comments            │
+│  • Quality tool comments                   │
+│  • Compare with historical reviews         │
+│  • Mark resolved issues                    │
+└────────────────────┬───────────────────────┘
+                     ▼
+┌────────────────────────────────────────────┐
+│           Create PR Review                 │
+│  • Individual line comments                │
+│  • Summary with issue counts               │
+│  • Quality metrics tables                  │
+│  • Recommendations                         │
+└────────────────────┬───────────────────────┘
+                     ▼
+┌────────────────────────────────────────────┐
+│         Determine Action Status            │
+│                                            │
+│              ┌──────────┐                  │
+│              │  Issues  │                  │
+│              │  Found?  │                  │
+│              └────┬─────┘                  │
+│                   │                        │
+│           ┌───────┴──────┐                 │
+│           ▼              ▼                 │
+│      ┌────────┐     ┌────────┐             │
+│      │   Yes  │     │   No   │             │
+│      └────┬───┘     └────┬───┘             │
+│           │              │                 │
+│           ▼              ▼                 │
+│    ┌──────────────┐ ┌────────────┐         │
+│    │ Fail Action  │ │Pass Action │         │
+│    │ (if critical │ │            │         │
+│    │  or config)  │ │            │         │
+│    └──────────────┘ └────────────┘         │
+└────────────────────────────────────────────┘

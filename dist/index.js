@@ -238,7 +238,10 @@ function createReviewComment(owner, repo, pull_number, comments) {
             repo,
             pull_number,
             comments,
-            event: "COMMENT",
+            event: comments.length > 0 ? "REQUEST_CHANGES" : "APPROVE",
+            body: comments.length > 0
+                ? "⚠️ Code review found issues that need to be addressed before merging. Please review the comments and make necessary changes."
+                : "✅ Code review passed. No issues found."
         });
     });
 }

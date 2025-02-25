@@ -216,7 +216,7 @@ function getAIResponse(prompt) {
             const response = yield together.chat.completions.create(Object.assign(Object.assign({}, queryConfig), { messages: [
                     {
                         role: "system",
-                        content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review."
+                        content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review. IMPORTANT: Your response must be valid JSON without any markdown formatting."
                     },
                     {
                         role: "user",
@@ -225,7 +225,9 @@ function getAIResponse(prompt) {
                 ] }));
             const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
             try {
-                const parsed = JSON.parse(res);
+                // Remove any markdown formatting that might be present
+                const cleanJson = res.replace(/```[a-z]*\n/g, '').replace(/```/g, '').trim();
+                const parsed = JSON.parse(cleanJson);
                 if (!parsed.reviews || !Array.isArray(parsed.reviews)) {
                     console.warn("Invalid response format from AI");
                     return [];
@@ -234,6 +236,7 @@ function getAIResponse(prompt) {
             }
             catch (parseError) {
                 console.error("Failed to parse AI response:", parseError);
+                console.error("Raw response:", res);
                 return [];
             }
         }
@@ -262,10 +265,8 @@ function createReviewComment(owner, repo, pull_number, comments) {
             const criticalIssues = comments.filter(c => c.severity === 'critical').length;
             const warnings = comments.filter(c => c.severity === 'warning').length;
             const suggestions = comments.filter(c => c.severity === 'suggestion').length;
-            // Always request changes if there are any issues
-            const event = (criticalIssues > 0 || warnings > 0) ? "REQUEST_CHANGES"
-                : suggestions > 0 ? "COMMENT"
-                    : "APPROVE";
+            // Never use APPROVE since GitHub Actions doesn't have permission for it
+            const event = (criticalIssues > 0 || warnings > 0) ? "REQUEST_CHANGES" : "COMMENT";
             const summary = comments.length > 0
                 ? `### AI Code Review Summary
 🔍 Found:
@@ -276,7 +277,7 @@ ${suggestions > 0 ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? 's' : '
 ${criticalIssues > 0 ? '\n⛔ BLOCKING: Critical issues must be addressed before merging.' : ''}
 ${warnings > 0 ? '\n⚠️ BLOCKING: Please review and address all warnings before merging.' : ''}
 ${suggestions > 0 ? '\n💡 Consider implementing the suggestions for code improvement.' : ''}`
-                : "### ✅ AI Code Review Summary\nNo issues found in this review.";
+                : "### ✅ AI Code Review Summary\nNo issues found in this review, but a human review is still recommended.";
             const reviewComments = comments.map(comment => ({
                 body: `${getSeverityEmoji(comment.severity)} [${comment.severity.toUpperCase()}] ${comment.body}`,
                 path: comment.path,

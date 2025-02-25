@@ -16,8 +16,8 @@ jobs:
           # Available models: Price per 1M tokens
             # meta-llama/Llama-3.3-70B-Instruct-Turbo                        $0.88
             # meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo-128K               $0.18
+            # meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo                  $3.50
             # deepseek-ai/DeepSeek-V3                                        $1.25
             # deepseek-ai/DeepSeek-R1                                        $3.00 / $7.00
-            # meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo                  $3.50
           TOGETHER_API_MODEL: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'  # or your preferred model
           exclude: '*.md,*.txt'  # optional: files to exclude

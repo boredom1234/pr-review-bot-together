@@ -345,12 +345,20 @@ interface ReviewComment {
   path: string;
   line: number;
   severity: "critical" | "warning" | "suggestion";
+  id?: string; // Unique identifier for tracking
+  status?: "active" | "resolved" | "outdated"; // Track comment status
 }
 
-interface GitHubComment {
-  body: string;
-  path: string;
-  line: number;
+interface HistoricalReviewComment extends ReviewComment {
+  id: string;
+  status: "active" | "resolved" | "outdated";
+}
+
+interface HistoricalReview {
+  id: string;
+  comment: HistoricalReviewComment;
+  commitSha: string;
+  timestamp: string;
 }
 
 function createPrompt(
@@ -543,8 +551,10 @@ async function createReviewComment(
     const suggestions = comments.filter(
       (c) => c.severity === "suggestion"
     ).length;
+    const resolvedIssues = comments.filter(
+      (c) => c.status === "resolved"
+    ).length;
 
-    // Never use APPROVE since GitHub Actions doesn't have permission for it
     const event =
       criticalIssues > 0 || warnings > 0 ? "REQUEST_CHANGES" : "COMMENT";
 
@@ -563,7 +573,13 @@ async function createReviewComment(
     });
 
     // Create detailed summary
-    let detailedSummary = "## 📋 Detailed Changes Required\n\n";
+    let detailedSummary = "## 📋 Code Review Summary\n\n";
+
+    if (resolvedIssues > 0) {
+      detailedSummary += `### ✅ Resolved Issues\n- ${resolvedIssues} issue${
+        resolvedIssues > 1 ? "s have" : " has"
+      } been resolved\n\n`;
+    }
 
     // Order of severity for the summary
     const severityOrder = ["critical", "warning", "suggestion"] as const;
@@ -579,7 +595,8 @@ async function createReviewComment(
           fileSection += `#### ${emoji} ${severity.toUpperCase()}\n\n`;
 
           comments.forEach((comment) => {
-            fileSection += `- **Line ${comment.line}**: ${comment.body.replace(
+            const status = comment.status === "resolved" ? "✅ RESOLVED: " : "";
+            fileSection += `- **Line ${comment.line}**: ${status}${comment.body.replace(
               /\n/g,
               "\n  "
             )}\n`;
@@ -593,42 +610,7 @@ async function createReviewComment(
       }
     });
 
-    const summary =
-      comments.length > 0
-        ? `### AI Code Review Summary
-🔍 Found:
-${
-  criticalIssues > 0
-    ? `- ❌ ${criticalIssues} critical issue${criticalIssues > 1 ? "s" : ""}\n`
-    : ""
-}
-${warnings > 0 ? `- ⚠️ ${warnings} warning${warnings > 1 ? "s" : ""}\n` : ""}
-${
-  suggestions > 0
-    ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? "s" : ""}\n`
-    : ""
-}
-
-${
-  criticalIssues > 0
-    ? "\n⛔ BLOCKING: Critical issues must be addressed before merging."
-    : ""
-}
-${
-  warnings > 0
-    ? "\n⚠️ BLOCKING: Please review and address all warnings before merging."
-    : ""
-}
-${
-  suggestions > 0
-    ? "\n💡 Consider implementing the suggestions for code improvement."
-    : ""
-}
-
-${detailedSummary}`
-        : "### ✅ AI Code Review Summary\nNo issues found in this review, but a human review is still recommended.";
-
-    const reviewComments: Array<GitHubComment> = comments.map((comment) => ({
+    const reviewComments = comments.map((comment) => ({
       body: `${getSeverityEmoji(
         comment.severity
       )} [${comment.severity.toUpperCase()}] ${comment.body}`,
@@ -642,7 +624,7 @@ ${detailedSummary}`
       pull_number,
       comments: reviewComments,
       event,
-      body: summary,
+      body: detailedSummary,
     });
   } catch (error: unknown) {
     console.error("Error submitting review:", error);
@@ -667,11 +649,109 @@ function getSeverityEmoji(
   }
 }
 
+async function getPreviousReviews(
+  owner: string,
+  repo: string,
+  pull_number: number
+): Promise<HistoricalReview[]> {
+  try {
+    const { data: comments } = await octokit.pulls.listReviewComments({
+      owner,
+      repo,
+      pull_number,
+      per_page: 100,
+    });
+
+    const reviews = comments
+      .map(comment => {
+        const match = comment.body.match(/<!--review-id:(.*?),commit:(.*?)-->/);
+        if (!match) return null;
+
+        const [, id, commitSha] = match;
+        const severity = comment.body.match(/\[(CRITICAL|WARNING|SUGGESTION)\]/i)?.[1].toLowerCase() as "critical" | "warning" | "suggestion";
+
+        const review: HistoricalReview = {
+          id,
+          commitSha,
+          timestamp: comment.created_at,
+          comment: {
+            body: comment.body.replace(/<!--.*?-->/g, '').trim(),
+            path: comment.path,
+            line: comment.line || 1,
+            severity: severity || "warning",
+            id,
+            status: "active"
+          }
+        };
+        return review;
+      })
+      .filter((review): review is HistoricalReview => review !== null);
+
+    return reviews;
+  } catch (error) {
+    console.error("Error fetching previous reviews:", error);
+    return [];
+  }
+}
+
+async function compareWithPreviousReviews(
+  newComments: ReviewComment[],
+  historicalReviews: HistoricalReview[],
+  currentCommitSha: string
+): Promise<ReviewComment[]> {
+  const processedComments: ReviewComment[] = [];
+
+  for (const newComment of newComments) {
+    // Generate a stable ID for the new comment based on its content and location
+    const commentId = Buffer.from(
+      `${newComment.path}:${newComment.line}:${newComment.body}`
+    ).toString('base64');
+    newComment.id = commentId;
+
+    // Check if this issue was previously reported
+    const previousReview = historicalReviews.find(
+      hr => hr.comment.path === newComment.path &&
+           Math.abs(hr.comment.line - newComment.line) <= 3 && // Allow small line number changes
+           hr.comment.body.replace(/\[.*?\]/g, '').trim() === newComment.body.replace(/\[.*?\]/g, '').trim()
+    );
+
+    if (previousReview) {
+      // If the issue still exists, mark it as persistent
+      newComment.body = `${newComment.body}\n\n⚠️ This issue was previously reported and still needs to be addressed.`;
+    }
+
+    // Add tracking metadata
+    newComment.body = `<!--review-id:${commentId},commit:${currentCommitSha}-->\n${newComment.body}`;
+    processedComments.push(newComment);
+  }
+
+  // Check for resolved issues
+  const resolvedComments = historicalReviews.filter(hr => 
+    !processedComments.some(pc => pc.id === hr.comment.id)
+  ).map(hr => ({
+    ...hr.comment,
+    body: `✅ RESOLVED: ${hr.comment.body}`,
+    status: "resolved" as const
+  }));
+
+  return [...processedComments, ...resolvedComments];
+}
+
 async function main() {
   const prDetails = await getPRDetails();
   let diffResult: DiffWithContext | null;
   const eventData = JSON.parse(
     readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
+  );
+
+  // Get the current commit SHA
+  const currentCommitSha = eventData.after || eventData.pull_request.head.sha;
+
+  // Fetch previous reviews first
+  const historicalReviews = await getPreviousReviews(
+    prDetails.owner,
+    prDetails.repo,
+    prDetails.pull_number
   );
 
   if (eventData.action === "opened") {
@@ -694,13 +774,11 @@ async function main() {
       head: newHeadSha,
     });
 
-    // Create a DiffWithContext object for the synchronize event
     diffResult = {
       diff: String(response.data),
-      fileContexts: new Map(), // We'll populate this with file contents
+      fileContexts: new Map(),
     };
 
-    // Parse the diff to get file paths and fetch their contents
     const parsedDiff = parseDiff(String(response.data));
     for (const file of parsedDiff) {
       if (file.to && file.to !== "/dev/null") {
@@ -738,11 +816,19 @@ async function main() {
     );
   });
 
-  const comments = await analyzeCode(
+  let comments = await analyzeCode(
     filteredDiff,
     prDetails,
     diffResult.fileContexts
   );
+
+  // Compare with previous reviews and update comments
+  comments = await compareWithPreviousReviews(
+    comments,
+    historicalReviews,
+    currentCommitSha
+  );
+
   await createReviewComment(
     prDetails.owner,
     prDetails.repo,
@@ -752,9 +838,11 @@ async function main() {
 
   // Set action status based on review outcome
   const criticalIssues = comments.filter(
-    (c) => c.severity === "critical"
+    (c) => c.severity === "critical" && c.status !== "resolved"
   ).length;
-  const warnings = comments.filter((c) => c.severity === "warning").length;
+  const warnings = comments.filter(
+    (c) => c.severity === "warning" && c.status !== "resolved"
+  ).length;
 
   if (criticalIssues > 0) {
     core.setFailed(

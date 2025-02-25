@@ -164,7 +164,11 @@ function createPrompt(file, chunk, prDetails, fileContent) {
     const fileExtension = file.to ? file.to.split('.').pop() || '' : '';
     const contextPrompt = fileContent ? `\nFull file content for context:\n\`\`\`${fileExtension}\n${fileContent}\n\`\`\`\n` : '';
     return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
+- Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "severity": "<severity>"}]}
+- Severity levels:
+  - "critical": For issues that must be fixed (security issues, bugs, broken functionality)
+  - "warning": For code quality issues that should be addressed
+  - "suggestion": For optional improvements
 - Do not give positive comments or compliments.
 - Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the comment in GitHub Markdown format.
@@ -228,21 +232,53 @@ function createComment(file, chunk, aiResponses) {
             body: aiResponse.reviewComment,
             path: file.to,
             line: Number(aiResponse.lineNumber),
+            severity: aiResponse.severity || 'warning'
         };
     });
 }
 function createReviewComment(owner, repo, pull_number, comments) {
     return __awaiter(this, void 0, void 0, function* () {
-        yield octokit.pulls.createReview({
-            owner,
-            repo,
-            pull_number,
-            comments,
-            event: comments.length > 0 ? "REQUEST_CHANGES" : "APPROVE",
-            body: comments.length > 0
-                ? "⚠️ Code review found issues that need to be addressed before merging. Please review the comments and make necessary changes."
-                : "✅ Code review passed. No issues found."
-        });
+        try {
+            const criticalIssues = comments.filter(c => c.severity === 'critical').length;
+            const warnings = comments.filter(c => c.severity === 'warning').length;
+            const suggestions = comments.filter(c => c.severity === 'suggestion').length;
+            const event = criticalIssues > 0 ? "REQUEST_CHANGES"
+                : warnings > 0 ? "REQUEST_CHANGES"
+                    : "APPROVE";
+            const summary = comments.length > 0
+                ? `### AI Code Review Summary
+🔍 Found:
+${criticalIssues > 0 ? `- ❌ ${criticalIssues} critical issue${criticalIssues > 1 ? 's' : ''}\n` : ''}
+${warnings > 0 ? `- ⚠️ ${warnings} warning${warnings > 1 ? 's' : ''}\n` : ''}
+${suggestions > 0 ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? 's' : ''}\n` : ''}
+
+${criticalIssues > 0 ? '\n⛔ Critical issues must be addressed before merging.' : ''}
+${warnings > 0 ? '\n⚠️ Please review and address the warnings before merging.' : ''}
+${suggestions > 0 ? '\n💡 Consider the suggestions for code improvement.' : ''}`
+                : "✅ Code review passed. No issues found.";
+            const reviewComments = comments.map(comment => ({
+                body: `[${comment.severity.toUpperCase()}] ${comment.body}`,
+                path: comment.path,
+                line: comment.line
+            }));
+            yield octokit.pulls.createReview({
+                owner,
+                repo,
+                pull_number,
+                comments: reviewComments,
+                event,
+                body: summary
+            });
+        }
+        catch (error) {
+            console.error('Error submitting review:', error);
+            if (error instanceof Error) {
+                throw new Error(`Failed to submit code review: ${error.message}`);
+            }
+            else {
+                throw new Error('Failed to submit code review: Unknown error');
+            }
+        }
     });
 }
 function main() {
@@ -299,9 +335,7 @@ function main() {
             return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
         });
         const comments = yield analyzeCode(filteredDiff, prDetails, diffResult.fileContexts);
-        if (comments.length > 0) {
-            yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-        }
+        yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
     });
 }
 main().catch((error) => {

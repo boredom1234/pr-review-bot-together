@@ -145,7 +145,7 @@ function validateFileExtension(filePath, fileContent) {
     // Common language indicators
     const indicators = {
         python: {
-            extensions: ['.py', '.pyw'],
+            extensions: [".py", ".pyw"],
             patterns: [
                 /^from\s+[\w.]+\s+import\s+/m,
                 /^import\s+[\w.]+/m,
@@ -153,10 +153,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^class\s+\w+[:(]/m,
                 /:$/m,
                 /^\s*@\w+/m, // decorators
-            ]
+            ],
         },
         javascript: {
-            extensions: ['.js', '.jsx', '.mjs'],
+            extensions: [".js", ".jsx", ".mjs"],
             patterns: [
                 /^const\s+\w+\s*=/m,
                 /^let\s+\w+\s*=/m,
@@ -165,19 +165,19 @@ function validateFileExtension(filePath, fileContent) {
                 /=>\s*{/m,
                 /^export\s+/m,
                 /^import\s+.*from/m, // ES6 imports
-            ]
+            ],
         },
         typescript: {
-            extensions: ['.ts', '.tsx'],
+            extensions: [".ts", ".tsx"],
             patterns: [
                 /^interface\s+\w+\s*{/m,
                 /^type\s+\w+\s*=/m,
                 /^enum\s+\w+\s*{/m,
                 /:\s*\w+[\[\]]*\s*[=;]/m, // type annotations
-            ]
+            ],
         },
         golang: {
-            extensions: ['.go'],
+            extensions: [".go"],
             patterns: [
                 /^package\s+\w+/m,
                 /^import\s+[\s\S]*?\)/m,
@@ -185,10 +185,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^type\s+\w+\s+struct\s*{/m,
                 /^type\s+\w+\s+interface\s*{/m,
                 /:\=$/m, // short variable declarations
-            ]
+            ],
         },
         c: {
-            extensions: ['.c', '.h'],
+            extensions: [".c", ".h"],
             patterns: [
                 /^#include\s+[<"]/m,
                 /^#define\s+\w+/m,
@@ -196,10 +196,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^void\s+\w+\s*\(/m,
                 /^int\s+\w+\s*\(/m,
                 /^char\s+\w+\s*\(/m, // char functions
-            ]
+            ],
         },
         cpp: {
-            extensions: ['.cpp', '.hpp', '.cc', '.hh', '.cxx', '.hxx'],
+            extensions: [".cpp", ".hpp", ".cc", ".hh", ".cxx", ".hxx"],
             patterns: [
                 /^#include\s+[<"]/m,
                 /^namespace\s+\w+\s*{/m,
@@ -207,10 +207,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^template\s*<.*>/m,
                 /^std::/m,
                 /^public:|^private:|^protected:/m, // access specifiers
-            ]
+            ],
         },
         java: {
-            extensions: ['.java'],
+            extensions: [".java"],
             patterns: [
                 /^package\s+[\w.]+;/m,
                 /^import\s+[\w.]+;/m,
@@ -218,10 +218,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^private\s+\w+\s+\w+/m,
                 /^protected\s+\w+\s+\w+/m,
                 /@Override/m, // annotations
-            ]
+            ],
         },
         rust: {
-            extensions: ['.rs'],
+            extensions: [".rs"],
             patterns: [
                 /^use\s+[\w:]+/m,
                 /^fn\s+\w+/m,
@@ -229,10 +229,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^struct\s+\w+/m,
                 /^impl\s+\w+/m,
                 /^mod\s+\w+/m, // module declarations
-            ]
+            ],
         },
         ruby: {
-            extensions: ['.rb', '.rake'],
+            extensions: [".rb", ".rake"],
             patterns: [
                 /^require\s+[\'"]/m,
                 /^class\s+\w+\s*(<\s*\w+)?/m,
@@ -240,10 +240,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^module\s+\w+/m,
                 /^attr_/m,
                 /^private$|^protected$/m, // access modifiers
-            ]
+            ],
         },
         swift: {
-            extensions: ['.swift'],
+            extensions: [".swift"],
             patterns: [
                 /^import\s+\w+/m,
                 /^class\s+\w+/m,
@@ -251,10 +251,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^protocol\s+\w+/m,
                 /^extension\s+\w+/m,
                 /^@objc/m, // objective-c interop
-            ]
+            ],
         },
         kotlin: {
-            extensions: ['.kt', '.kts'],
+            extensions: [".kt", ".kts"],
             patterns: [
                 /^package\s+[\w.]+/m,
                 /^import\s+[\w.]+/m,
@@ -262,10 +262,10 @@ function validateFileExtension(filePath, fileContent) {
                 /^class\s+\w+/m,
                 /^data\s+class/m,
                 /^@\w+/m, // annotations
-            ]
+            ],
         },
         php: {
-            extensions: ['.php'],
+            extensions: [".php"],
             patterns: [
                 /^<\?php/m,
                 /^namespace\s+[\w\\]+;/m,
@@ -273,8 +273,8 @@ function validateFileExtension(filePath, fileContent) {
                 /^class\s+\w+/m,
                 /^public\s+function/m,
                 /^\$\w+\s*=/m, // variable assignments
-            ]
-        }
+            ],
+        },
     };
     // Detect the likely language based on content
     let detectedLanguage = null;
@@ -286,7 +286,8 @@ function validateFileExtension(filePath, fileContent) {
             detectedLanguage = lang;
         }
     }
-    if (!detectedLanguage || maxMatches < 2) { // Require at least 2 matches for confidence
+    if (!detectedLanguage || maxMatches < 2) {
+        // Require at least 2 matches for confidence
         return null; // Can't determine the language with confidence
     }
     // Check if the file extension matches the detected language
@@ -296,7 +297,7 @@ function validateFileExtension(filePath, fileContent) {
             body: `⚠️ File extension mismatch: This appears to be ${detectedLanguage} code but has a '${extension}' extension. Consider renaming to '${validExtensions[0]}'`,
             path: filePath,
             line: 1,
-            severity: 'critical'
+            severity: "critical",
         };
     }
     return null;

@@ -52,7 +52,7 @@ async function detectTools(repoPath: string): Promise<string[]> {
     console.error('Error detecting Python tools:', error);
   }
   
-  // Add more language detection as needed
+  // Add more language detection as needed <TODO>
   
   return tools;
 }

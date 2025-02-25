@@ -5,6 +5,7 @@ import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
 import Together from "together-ai";
 import path from "path";
+import { runQualityMetrics, formatQualityMetricsMarkdown } from "./qualityMetrics";
 
 // Add at the top of your file for local development
 if (process.env.NODE_ENV !== "production") {
@@ -542,7 +543,8 @@ async function createReviewComment(
   owner: string,
   repo: string,
   pull_number: number,
-  comments: Array<ReviewComment>
+  comments: Array<ReviewComment>,
+  qualityMetricsMarkdown: string = ""
 ): Promise<void> {
   try {
     const criticalIssues = comments.filter(
@@ -610,6 +612,11 @@ async function createReviewComment(
         detailedSummary += fileHeader + fileSection;
       }
     });
+
+    // Add quality metrics to the summary if available
+    if (qualityMetricsMarkdown) {
+      detailedSummary += `\n${qualityMetricsMarkdown}\n`;
+    }
 
     const reviewComments = comments.map((comment) => ({
       body: `${getSeverityEmoji(
@@ -817,11 +824,31 @@ async function main() {
     );
   });
 
+  // Get list of changed files for quality metrics
+  const changedFiles = filteredDiff
+    .filter(file => file.to && file.to !== "/dev/null")
+    .map(file => file.to as string);
+
+  // Run quality metrics on changed files
+  const qualityResults = await runQualityMetrics(process.cwd(), changedFiles);
+  
+  // Convert quality issues to review comments
+  const qualityComments: ReviewComment[] = qualityResults.issues.map(issue => ({
+    body: `${issue.message} (${issue.rule})`,
+    path: issue.path,
+    line: issue.line,
+    severity: issue.severity,
+    source: 'quality-tool'
+  }));
+
   let comments = await analyzeCode(
     filteredDiff,
     prDetails,
     diffResult.fileContexts
   );
+
+  // Add quality comments to AI comments
+  comments = [...comments, ...qualityComments];
 
   // Compare with previous reviews and update comments
   comments = await compareWithPreviousReviews(
@@ -830,11 +857,15 @@ async function main() {
     currentCommitSha
   );
 
+  // Format quality metrics as markdown
+  const qualityMetricsMarkdown = formatQualityMetricsMarkdown(qualityResults.metrics);
+
   await createReviewComment(
     prDetails.owner,
     prDetails.repo,
     prDetails.pull_number,
-    comments
+    comments,
+    qualityMetricsMarkdown
   );
 
   // Set action status based on review outcome
@@ -844,6 +875,9 @@ async function main() {
   const warnings = comments.filter(
     (c) => c.severity === "warning" && c.status !== "resolved"
   ).length;
+
+  const failOnQualityIssues = core.getInput('fail_on_quality_issues') === 'true';
+  const qualityIssuesCount = qualityResults.issues.length;
 
   if (criticalIssues > 0) {
     core.setFailed(
@@ -855,6 +889,12 @@ async function main() {
     core.setFailed(
       `⚠️ Found ${warnings} warning${
         warnings > 1 ? "s" : ""
+      } that should be addressed.`
+    );
+  } else if (failOnQualityIssues && qualityIssuesCount > 0) {
+    core.setFailed(
+      `⚠️ Found ${qualityIssuesCount} quality issue${
+        qualityIssuesCount > 1 ? "s" : ""
       } that should be addressed.`
     );
   } else {

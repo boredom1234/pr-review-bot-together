@@ -49,6 +49,7 @@ const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
 const together_ai_1 = __importDefault(__nccwpck_require__(7598));
 const path_1 = __importDefault(__nccwpck_require__(1017));
+const qualityMetrics_1 = __nccwpck_require__(8890);
 // Add at the top of your file for local development
 if (process.env.NODE_ENV !== "production") {
     (__nccwpck_require__(2437).config)();
@@ -476,7 +477,7 @@ function createComment(file, chunk, aiResponses) {
         ];
     });
 }
-function createReviewComment(owner, repo, pull_number, comments) {
+function createReviewComment(owner, repo, pull_number, comments, qualityMetricsMarkdown = "") {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const criticalIssues = comments.filter((c) => c.severity === "critical").length;
@@ -522,6 +523,10 @@ function createReviewComment(owner, repo, pull_number, comments) {
                     detailedSummary += fileHeader + fileSection;
                 }
             });
+            // Add quality metrics to the summary if available
+            if (qualityMetricsMarkdown) {
+                detailedSummary += `\n${qualityMetricsMarkdown}\n`;
+            }
             const reviewComments = comments.map((comment) => ({
                 body: `${getSeverityEmoji(comment.severity)} [${comment.severity.toUpperCase()}] ${comment.body}`,
                 path: comment.path,
@@ -677,18 +682,41 @@ function main() {
         const filteredDiff = parsedDiff.filter((file) => {
             return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
         });
+        // Get list of changed files for quality metrics
+        const changedFiles = filteredDiff
+            .filter(file => file.to && file.to !== "/dev/null")
+            .map(file => file.to);
+        // Run quality metrics on changed files
+        const qualityResults = yield (0, qualityMetrics_1.runQualityMetrics)(process.cwd(), changedFiles);
+        // Convert quality issues to review comments
+        const qualityComments = qualityResults.issues.map(issue => ({
+            body: `${issue.message} (${issue.rule})`,
+            path: issue.path,
+            line: issue.line,
+            severity: issue.severity,
+            source: 'quality-tool'
+        }));
         let comments = yield analyzeCode(filteredDiff, prDetails, diffResult.fileContexts);
+        // Add quality comments to AI comments
+        comments = [...comments, ...qualityComments];
         // Compare with previous reviews and update comments
         comments = yield compareWithPreviousReviews(comments, historicalReviews, currentCommitSha);
-        yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+        // Format quality metrics as markdown
+        const qualityMetricsMarkdown = (0, qualityMetrics_1.formatQualityMetricsMarkdown)(qualityResults.metrics);
+        yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments, qualityMetricsMarkdown);
         // Set action status based on review outcome
         const criticalIssues = comments.filter((c) => c.severity === "critical" && c.status !== "resolved").length;
         const warnings = comments.filter((c) => c.severity === "warning" && c.status !== "resolved").length;
+        const failOnQualityIssues = core.getInput('fail_on_quality_issues') === 'true';
+        const qualityIssuesCount = qualityResults.issues.length;
         if (criticalIssues > 0) {
             core.setFailed(`❌ Found ${criticalIssues} critical issue${criticalIssues > 1 ? "s" : ""} that must be fixed.`);
         }
         else if (warnings > 0) {
             core.setFailed(`⚠️ Found ${warnings} warning${warnings > 1 ? "s" : ""} that should be addressed.`);
+        }
+        else if (failOnQualityIssues && qualityIssuesCount > 0) {
+            core.setFailed(`⚠️ Found ${qualityIssuesCount} quality issue${qualityIssuesCount > 1 ? "s" : ""} that should be addressed.`);
         }
         else {
             core.info("✅ Code review passed successfully.");
@@ -699,6 +727,247 @@ main().catch((error) => {
     console.error("Error:", error);
     process.exit(1);
 });
+
+
+/***/ }),
+
+/***/ 8890:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.formatQualityMetricsMarkdown = exports.runQualityMetrics = void 0;
+const child_process_1 = __nccwpck_require__(2081);
+const util = __importStar(__nccwpck_require__(3837));
+const fs = __importStar(__nccwpck_require__(7147));
+const path = __importStar(__nccwpck_require__(1017));
+const core = __importStar(__nccwpck_require__(2186));
+const execPromise = util.promisify(child_process_1.exec);
+// Detect which tools to use based on repo content
+function detectTools(repoPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const tools = [];
+        // Check for JavaScript/TypeScript files
+        try {
+            const hasJsFiles = fs.existsSync(path.join(repoPath, 'package.json'));
+            if (hasJsFiles) {
+                // Check if ESLint is configured
+                if (fs.existsSync(path.join(repoPath, '.eslintrc.js')) ||
+                    fs.existsSync(path.join(repoPath, '.eslintrc.json')) ||
+                    fs.existsSync(path.join(repoPath, '.eslintrc.yml'))) {
+                    tools.push('eslint');
+                }
+            }
+        }
+        catch (error) {
+            console.error('Error detecting JS tools:', error);
+        }
+        // Check for Python files
+        try {
+            const hasPyFiles = fs.readdirSync(repoPath).some(file => file.endsWith('.py'));
+            if (hasPyFiles) {
+                tools.push('pylint');
+            }
+        }
+        catch (error) {
+            console.error('Error detecting Python tools:', error);
+        }
+        // Add more language detection as needed <TODO>
+        return tools;
+    });
+}
+// Run ESLint analysis
+function runEslint(repoPath, filePaths) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Install ESLint if not already installed
+            yield execPromise('npm install eslint --no-save', { cwd: repoPath });
+            // Filter for JS/TS files
+            const jsFiles = filePaths.filter(file => file.endsWith('.js') ||
+                file.endsWith('.jsx') ||
+                file.endsWith('.ts') ||
+                file.endsWith('.tsx'));
+            if (jsFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Run ESLint with JSON reporter
+            const { stdout } = yield execPromise(`npx eslint ${jsFiles.join(' ')} --format json`, { cwd: repoPath });
+            const eslintResults = JSON.parse(stdout);
+            // Transform ESLint results to our format
+            const issues = [];
+            eslintResults.forEach((result) => {
+                result.messages.forEach((msg) => {
+                    issues.push({
+                        path: result.filePath.replace(`${repoPath}/`, ''),
+                        line: msg.line,
+                        message: msg.message,
+                        rule: msg.ruleId || 'unknown',
+                        severity: msg.severity === 2 ? 'critical' : (msg.severity === 1 ? 'warning' : 'suggestion')
+                    });
+                });
+            });
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter(i => i.severity === 'critical').length,
+                warningIssues: issues.filter(i => i.severity === 'warning').length,
+                filesWithIssues: new Set(issues.map(i => i.path)).size
+            };
+            return { issues, metrics };
+        }
+        catch (error) {
+            console.error('Error running ESLint:', error);
+            return { issues: [] };
+        }
+    });
+}
+// Run Pylint analysis
+function runPylint(repoPath, filePaths) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Install Pylint if not already installed
+            yield execPromise('pip install pylint', { cwd: repoPath });
+            // Filter for Python files
+            const pyFiles = filePaths.filter(file => file.endsWith('.py'));
+            if (pyFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Run Pylint with JSON reporter
+            const { stdout } = yield execPromise(`pylint --output-format=json ${pyFiles.join(' ')}`, { cwd: repoPath });
+            const pylintResults = JSON.parse(stdout);
+            // Transform Pylint results to our format
+            const issues = [];
+            pylintResults.forEach((result) => {
+                // Map Pylint severity to our severity levels
+                let severity;
+                if (result.type === 'error') {
+                    severity = 'critical';
+                }
+                else if (result.type === 'warning') {
+                    severity = 'warning';
+                }
+                else {
+                    severity = 'suggestion';
+                }
+                issues.push({
+                    path: result.path,
+                    line: result.line,
+                    message: result.message,
+                    rule: result.symbol,
+                    severity
+                });
+            });
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter(i => i.severity === 'critical').length,
+                warningIssues: issues.filter(i => i.severity === 'warning').length,
+                filesWithIssues: new Set(issues.map(i => i.path)).size
+            };
+            return { issues, metrics };
+        }
+        catch (error) {
+            console.error('Error running Pylint:', error);
+            return { issues: [] };
+        }
+    });
+}
+// Main function to run quality metrics
+function runQualityMetrics(repoPath, changedFiles) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const enableMetrics = core.getInput('enable_quality_metrics') === 'true';
+        if (!enableMetrics) {
+            return { issues: [], metrics: {} };
+        }
+        let toolsToRun = core.getInput('quality_tools').split(',').map(t => t.trim());
+        // Auto-detect tools if set to "auto"
+        if (toolsToRun.length === 1 && toolsToRun[0] === 'auto') {
+            toolsToRun = yield detectTools(repoPath);
+            core.info(`Auto-detected quality tools: ${toolsToRun.join(', ')}`);
+        }
+        const allIssues = [];
+        const allMetrics = {};
+        // Run each tool
+        for (const tool of toolsToRun) {
+            core.info(`Running quality tool: ${tool}`);
+            let result = { issues: [] };
+            switch (tool.toLowerCase()) {
+                case 'eslint':
+                    result = yield runEslint(repoPath, changedFiles);
+                    break;
+                case 'pylint':
+                    result = yield runPylint(repoPath, changedFiles);
+                    break;
+                // Add more tools as needed
+                default:
+                    core.warning(`Unknown quality tool: ${tool}`);
+                    continue;
+            }
+            allIssues.push(...result.issues);
+            if (result.metrics) {
+                allMetrics[tool] = result.metrics;
+            }
+        }
+        return { issues: allIssues, metrics: allMetrics };
+    });
+}
+exports.runQualityMetrics = runQualityMetrics;
+// Format quality metrics as markdown
+function formatQualityMetricsMarkdown(metrics) {
+    let markdown = '## 📊 Code Quality Metrics\n\n';
+    if (Object.keys(metrics).length === 0) {
+        return markdown + 'No quality metrics collected.\n';
+    }
+    for (const [tool, toolMetrics] of Object.entries(metrics)) {
+        markdown += `### ${tool.toUpperCase()}\n\n`;
+        markdown += '| Metric | Value |\n';
+        markdown += '| ------ | ----- |\n';
+        for (const [metric, value] of Object.entries(toolMetrics)) {
+            // Format metric name for better readability
+            const formattedMetric = metric
+                .replace(/([A-Z])/g, ' $1')
+                .replace(/^./, str => str.toUpperCase())
+                .replace(/([a-z])([A-Z])/g, '$1 $2');
+            markdown += `| ${formattedMetric} | ${value} |\n`;
+        }
+        markdown += '\n';
+    }
+    return markdown;
+}
+exports.formatQualityMetricsMarkdown = formatQualityMetricsMarkdown;
 
 
 /***/ }),
@@ -13670,6 +13939,14 @@ module.exports = eval("require")("encoding");
 
 "use strict";
 module.exports = require("assert");
+
+/***/ }),
+
+/***/ 2081:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("child_process");
 
 /***/ }),
 

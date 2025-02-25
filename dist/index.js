@@ -336,6 +336,18 @@ function main() {
         });
         const comments = yield analyzeCode(filteredDiff, prDetails, diffResult.fileContexts);
         yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+        // Set action status based on review outcome
+        const criticalIssues = comments.filter(c => c.severity === 'critical').length;
+        const warnings = comments.filter(c => c.severity === 'warning').length;
+        if (criticalIssues > 0) {
+            core.setFailed(`❌ Found ${criticalIssues} critical issue${criticalIssues > 1 ? 's' : ''} that must be fixed.`);
+        }
+        else if (warnings > 0) {
+            core.setFailed(`⚠️ Found ${warnings} warning${warnings > 1 ? 's' : ''} that should be addressed.`);
+        }
+        else {
+            core.info('✅ Code review passed successfully.');
+        }
     });
 }
 main().catch((error) => {

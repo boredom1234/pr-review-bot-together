@@ -49,7 +49,7 @@ const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
 const together_ai_1 = __importDefault(__nccwpck_require__(7598));
 // Add at the top of your file for local development
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== "production") {
     (__nccwpck_require__(2437).config)();
 }
 const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
@@ -87,8 +87,8 @@ function getFileContent(owner, repo, path, ref) {
                 ref,
             });
             // Handle file content response
-            if ('content' in response.data && !Array.isArray(response.data)) {
-                return Buffer.from(response.data.content, 'base64').toString('utf8');
+            if ("content" in response.data && !Array.isArray(response.data)) {
+                return Buffer.from(response.data.content, "base64").toString("utf8");
             }
             return null;
         }
@@ -119,7 +119,7 @@ function getDiff(owner, repo, pull_number) {
             const parsedDiff = (0, parse_diff_1.default)(response.data);
             // Fetch full content for each modified file
             for (const file of parsedDiff) {
-                if (file.to && file.to !== '/dev/null') {
+                if (file.to && file.to !== "/dev/null") {
                     const fileContent = yield getFileContent(owner, repo, file.to, prDetails.data.head.sha);
                     if (fileContent) {
                         fileContexts.set(file.to, fileContent);
@@ -161,8 +161,10 @@ function analyzeCode(parsedDiff, prDetails, fileContexts) {
     });
 }
 function createPrompt(file, chunk, prDetails, fileContent) {
-    const fileExtension = file.to ? file.to.split('.').pop() || '' : '';
-    const contextPrompt = fileContent ? `\nFull file content for context:\n\`\`\`${fileExtension}\n${fileContent}\n\`\`\`\n` : '';
+    const fileExtension = file.to ? file.to.split(".").pop() || "" : "";
+    const contextPrompt = fileContent
+        ? `\nFull file content for context:\n\`\`\`${fileExtension}\n${fileContent}\n\`\`\`\n`
+        : "";
     return `You are a strict code reviewer. Your task is to thoroughly analyze the code and find potential issues, bugs, and improvements. Instructions:
 
 - Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "severity": "<severity>"}]}
@@ -216,7 +218,7 @@ function getAIResponse(prompt) {
             const response = yield together.chat.completions.create(Object.assign(Object.assign({}, queryConfig), { messages: [
                     {
                         role: "system",
-                        content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review. IMPORTANT: Your response must be valid JSON without any markdown formatting."
+                        content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review. IMPORTANT: Your response must be valid JSON without any markdown formatting.",
                     },
                     {
                         role: "user",
@@ -226,7 +228,10 @@ function getAIResponse(prompt) {
             const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
             try {
                 // Remove any markdown formatting that might be present
-                const cleanJson = res.replace(/```[a-z]*\n/g, '').replace(/```/g, '').trim();
+                const cleanJson = res
+                    .replace(/```[a-z]*\n/g, "")
+                    .replace(/```/g, "")
+                    .trim();
                 const parsed = JSON.parse(cleanJson);
                 if (!parsed.reviews || !Array.isArray(parsed.reviews)) {
                     console.warn("Invalid response format from AI");
@@ -254,11 +259,11 @@ function createComment(file, chunk, aiResponses) {
         // Convert lineNumber to number
         const lineNum = Number(aiResponse.lineNumber);
         // Check if the line number is within any of the changed chunks
-        const isLineInDiff = chunk.changes.some(change => {
-            if ('add' === change.type) {
+        const isLineInDiff = chunk.changes.some((change) => {
+            if ("add" === change.type) {
                 return change.ln === lineNum;
             }
-            if ('normal' === change.type) {
+            if ("normal" === change.type) {
                 return change.ln2 === lineNum;
             }
             return false;
@@ -266,11 +271,11 @@ function createComment(file, chunk, aiResponses) {
         if (!isLineInDiff) {
             // If the line is not in diff, try to find the closest changed line
             const changedLines = chunk.changes
-                .filter(change => change.type === 'add' || change.type === 'normal')
-                .map(change => {
-                if (change.type === 'add')
+                .filter((change) => change.type === "add" || change.type === "normal")
+                .map((change) => {
+                if (change.type === "add")
                     return change.ln;
-                if (change.type === 'normal')
+                if (change.type === "normal")
                     return change.ln2;
                 return undefined;
             })
@@ -281,44 +286,94 @@ function createComment(file, chunk, aiResponses) {
             }
             // Find the closest line number in the diff
             const closestLine = changedLines.reduce((prev, curr) => Math.abs(curr - lineNum) < Math.abs(prev - lineNum) ? curr : prev);
-            return [{
+            return [
+                {
                     body: `[Original comment was for line ${lineNum}]\n${aiResponse.reviewComment}`,
                     path: file.to,
                     line: closestLine,
-                    severity: aiResponse.severity || 'warning'
-                }];
+                    severity: aiResponse.severity || "warning",
+                },
+            ];
         }
-        return [{
+        return [
+            {
                 body: aiResponse.reviewComment,
                 path: file.to,
                 line: lineNum,
-                severity: aiResponse.severity || 'warning'
-            }];
+                severity: aiResponse.severity || "warning",
+            },
+        ];
     });
 }
 function createReviewComment(owner, repo, pull_number, comments) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const criticalIssues = comments.filter(c => c.severity === 'critical').length;
-            const warnings = comments.filter(c => c.severity === 'warning').length;
-            const suggestions = comments.filter(c => c.severity === 'suggestion').length;
+            const criticalIssues = comments.filter((c) => c.severity === "critical").length;
+            const warnings = comments.filter((c) => c.severity === "warning").length;
+            const suggestions = comments.filter((c) => c.severity === "suggestion").length;
             // Never use APPROVE since GitHub Actions doesn't have permission for it
-            const event = (criticalIssues > 0 || warnings > 0) ? "REQUEST_CHANGES" : "COMMENT";
+            const event = criticalIssues > 0 || warnings > 0 ? "REQUEST_CHANGES" : "COMMENT";
+            // Group comments by file and severity
+            const commentsByFile = new Map();
+            comments.forEach((comment) => {
+                if (!commentsByFile.has(comment.path)) {
+                    commentsByFile.set(comment.path, new Map());
+                }
+                const fileComments = commentsByFile.get(comment.path);
+                if (!fileComments.has(comment.severity)) {
+                    fileComments.set(comment.severity, []);
+                }
+                fileComments.get(comment.severity).push(comment);
+            });
+            // Create detailed summary
+            let detailedSummary = "## 📋 Detailed Changes Required\n\n";
+            // Order of severity for the summary
+            const severityOrder = ["critical", "warning", "suggestion"];
+            commentsByFile.forEach((fileComments, filePath) => {
+                const fileHeader = `### 📁 ${filePath}\n\n`;
+                let fileSection = "";
+                severityOrder.forEach((severity) => {
+                    const comments = fileComments.get(severity) || [];
+                    if (comments.length > 0) {
+                        const emoji = getSeverityEmoji(severity);
+                        fileSection += `#### ${emoji} ${severity.toUpperCase()}\n\n`;
+                        comments.forEach((comment) => {
+                            fileSection += `- **Line ${comment.line}**: ${comment.body.replace(/\n/g, "\n  ")}\n`;
+                        });
+                        fileSection += "\n";
+                    }
+                });
+                if (fileSection) {
+                    detailedSummary += fileHeader + fileSection;
+                }
+            });
             const summary = comments.length > 0
                 ? `### AI Code Review Summary
 🔍 Found:
-${criticalIssues > 0 ? `- ❌ ${criticalIssues} critical issue${criticalIssues > 1 ? 's' : ''}\n` : ''}
-${warnings > 0 ? `- ⚠️ ${warnings} warning${warnings > 1 ? 's' : ''}\n` : ''}
-${suggestions > 0 ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? 's' : ''}\n` : ''}
+${criticalIssues > 0
+                    ? `- ❌ ${criticalIssues} critical issue${criticalIssues > 1 ? "s" : ""}\n`
+                    : ""}
+${warnings > 0 ? `- ⚠️ ${warnings} warning${warnings > 1 ? "s" : ""}\n` : ""}
+${suggestions > 0
+                    ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? "s" : ""}\n`
+                    : ""}
 
-${criticalIssues > 0 ? '\n⛔ BLOCKING: Critical issues must be addressed before merging.' : ''}
-${warnings > 0 ? '\n⚠️ BLOCKING: Please review and address all warnings before merging.' : ''}
-${suggestions > 0 ? '\n💡 Consider implementing the suggestions for code improvement.' : ''}`
+${criticalIssues > 0
+                    ? "\n⛔ BLOCKING: Critical issues must be addressed before merging."
+                    : ""}
+${warnings > 0
+                    ? "\n⚠️ BLOCKING: Please review and address all warnings before merging."
+                    : ""}
+${suggestions > 0
+                    ? "\n💡 Consider implementing the suggestions for code improvement."
+                    : ""}
+
+${detailedSummary}`
                 : "### ✅ AI Code Review Summary\nNo issues found in this review, but a human review is still recommended.";
-            const reviewComments = comments.map(comment => ({
+            const reviewComments = comments.map((comment) => ({
                 body: `${getSeverityEmoji(comment.severity)} [${comment.severity.toUpperCase()}] ${comment.body}`,
                 path: comment.path,
-                line: comment.line
+                line: comment.line,
             }));
             yield octokit.pulls.createReview({
                 owner,
@@ -326,28 +381,28 @@ ${suggestions > 0 ? '\n💡 Consider implementing the suggestions for code impro
                 pull_number,
                 comments: reviewComments,
                 event,
-                body: summary
+                body: summary,
             });
         }
         catch (error) {
-            console.error('Error submitting review:', error);
+            console.error("Error submitting review:", error);
             if (error instanceof Error) {
                 throw new Error(`Failed to submit code review: ${error.message}`);
             }
             else {
-                throw new Error('Failed to submit code review: Unknown error');
+                throw new Error("Failed to submit code review: Unknown error");
             }
         }
     });
 }
 function getSeverityEmoji(severity) {
     switch (severity) {
-        case 'critical':
-            return '❌';
-        case 'warning':
-            return '⚠️';
-        case 'suggestion':
-            return '💡';
+        case "critical":
+            return "❌";
+        case "warning":
+            return "⚠️";
+        case "suggestion":
+            return "💡";
     }
 }
 function main() {
@@ -379,7 +434,7 @@ function main() {
             // Parse the diff to get file paths and fetch their contents
             const parsedDiff = (0, parse_diff_1.default)(String(response.data));
             for (const file of parsedDiff) {
-                if (file.to && file.to !== '/dev/null') {
+                if (file.to && file.to !== "/dev/null") {
                     const fileContent = yield getFileContent(prDetails.owner, prDetails.repo, file.to, newHeadSha);
                     if (fileContent) {
                         diffResult.fileContexts.set(file.to, fileContent);
@@ -406,16 +461,16 @@ function main() {
         const comments = yield analyzeCode(filteredDiff, prDetails, diffResult.fileContexts);
         yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
         // Set action status based on review outcome
-        const criticalIssues = comments.filter(c => c.severity === 'critical').length;
-        const warnings = comments.filter(c => c.severity === 'warning').length;
+        const criticalIssues = comments.filter((c) => c.severity === "critical").length;
+        const warnings = comments.filter((c) => c.severity === "warning").length;
         if (criticalIssues > 0) {
-            core.setFailed(`❌ Found ${criticalIssues} critical issue${criticalIssues > 1 ? 's' : ''} that must be fixed.`);
+            core.setFailed(`❌ Found ${criticalIssues} critical issue${criticalIssues > 1 ? "s" : ""} that must be fixed.`);
         }
         else if (warnings > 0) {
-            core.setFailed(`⚠️ Found ${warnings} warning${warnings > 1 ? 's' : ''} that should be addressed.`);
+            core.setFailed(`⚠️ Found ${warnings} warning${warnings > 1 ? "s" : ""} that should be addressed.`);
         }
         else {
-            core.info('✅ Code review passed successfully.');
+            core.info("✅ Code review passed successfully.");
         }
     });
 }

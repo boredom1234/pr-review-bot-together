@@ -244,7 +244,7 @@ function createReviewComment(owner, repo, pull_number, comments) {
             const suggestions = comments.filter(c => c.severity === 'suggestion').length;
             const event = criticalIssues > 0 ? "REQUEST_CHANGES"
                 : warnings > 0 ? "REQUEST_CHANGES"
-                    : "APPROVE";
+                    : "COMMENT";
             const summary = comments.length > 0
                 ? `### AI Code Review Summary
 🔍 Found:
@@ -255,7 +255,7 @@ ${suggestions > 0 ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? 's' : '
 ${criticalIssues > 0 ? '\n⛔ Critical issues must be addressed before merging.' : ''}
 ${warnings > 0 ? '\n⚠️ Please review and address the warnings before merging.' : ''}
 ${suggestions > 0 ? '\n💡 Consider the suggestions for code improvement.' : ''}`
-                : "✅ Code review passed. No issues found.";
+                : "### ✅ AI Code Review Summary\nNo issues found. The code looks good!";
             const reviewComments = comments.map(comment => ({
                 body: `[${comment.severity.toUpperCase()}] ${comment.body}`,
                 path: comment.path,

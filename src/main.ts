@@ -230,7 +230,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
       messages: [
         {
           role: "system",
-          content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review."
+          content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review. IMPORTANT: Your response must be valid JSON without any markdown formatting."
         },
         {
           role: "user",
@@ -241,7 +241,9 @@ async function getAIResponse(prompt: string): Promise<Array<{
 
     const res = response.choices[0].message?.content?.trim() || "{}";
     try {
-      const parsed = JSON.parse(res);
+      // Remove any markdown formatting that might be present
+      const cleanJson = res.replace(/```[a-z]*\n/g, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
       if (!parsed.reviews || !Array.isArray(parsed.reviews)) {
         console.warn("Invalid response format from AI");
         return [];
@@ -249,6 +251,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
       return parsed.reviews;
     } catch (parseError) {
       console.error("Failed to parse AI response:", parseError);
+      console.error("Raw response:", res);
       return [];
     }
   } catch (error) {
@@ -290,10 +293,8 @@ async function createReviewComment(
     const warnings = comments.filter(c => c.severity === 'warning').length;
     const suggestions = comments.filter(c => c.severity === 'suggestion').length;
 
-    // Always request changes if there are any issues
-    const event = (criticalIssues > 0 || warnings > 0) ? "REQUEST_CHANGES" 
-                 : suggestions > 0 ? "COMMENT"
-                 : "APPROVE";
+    // Never use APPROVE since GitHub Actions doesn't have permission for it
+    const event = (criticalIssues > 0 || warnings > 0) ? "REQUEST_CHANGES" : "COMMENT";
 
     const summary = comments.length > 0 
       ? `### AI Code Review Summary
@@ -305,7 +306,7 @@ ${suggestions > 0 ? `- 💡 ${suggestions} suggestion${suggestions > 1 ? 's' : '
 ${criticalIssues > 0 ? '\n⛔ BLOCKING: Critical issues must be addressed before merging.' : ''}
 ${warnings > 0 ? '\n⚠️ BLOCKING: Please review and address all warnings before merging.' : ''}
 ${suggestions > 0 ? '\n💡 Consider implementing the suggestions for code improvement.' : ''}`
-      : "### ✅ AI Code Review Summary\nNo issues found in this review.";
+      : "### ✅ AI Code Review Summary\nNo issues found in this review, but a human review is still recommended.";
 
     const reviewComments: Array<GitHubComment> = comments.map(comment => ({
       body: `${getSeverityEmoji(comment.severity)} [${comment.severity.toUpperCase()}] ${comment.body}`,

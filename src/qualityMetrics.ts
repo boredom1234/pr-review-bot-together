@@ -398,9 +398,6 @@ async function runRubocop(
   configPath: string | null
 ): Promise<ToolResult> {
   try {
-    // Install RuboCop if not already installed
-    await execPromise("sudo gem install rubocop", { cwd: repoPath });
-
     // Filter for Ruby files
     const rubyFiles = filePaths.filter((file) => file.endsWith(".rb"));
 
@@ -408,7 +405,33 @@ async function runRubocop(
       return { issues: [] };
     }
 
+    // Try to use existing RuboCop installation first
+    try {
+      console.log("Checking if RuboCop is already installed");
+      await execPromise("rubocop --version", { cwd: repoPath });
+      console.log("RuboCop is already installed");
+    } catch (versionError) {
+      console.log("RuboCop not found, attempting to install");
+      try {
+        // Try installing without sudo first
+        await execPromise("gem install rubocop", { cwd: repoPath });
+        console.log("Successfully installed RuboCop without sudo");
+      } catch (installError) {
+        console.error("Error installing RuboCop without sudo:", installError);
+        try {
+          // Try with sudo as fallback
+          await execPromise("sudo gem install rubocop", { cwd: repoPath });
+          console.log("Successfully installed RuboCop with sudo");
+        } catch (sudoError) {
+          console.error("Error installing RuboCop with sudo:", sudoError);
+          console.log("Skipping RuboCop analysis due to installation failure");
+          return { issues: [] };
+        }
+      }
+    }
+
     // Run RuboCop with JSON formatter
+    console.log(`Running RuboCop on ${rubyFiles.length} Ruby files`);
     const { stdout } = await execPromise(
       `rubocop --format json ${rubyFiles.join(" ")}`,
       { cwd: repoPath }

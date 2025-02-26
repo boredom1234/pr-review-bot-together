@@ -395,7 +395,7 @@ async function runRubocop(
 ): Promise<ToolResult> {
   try {
     // Install RuboCop if not already installed
-    await execPromise("gem install rubocop", { cwd: repoPath });
+    await execPromise("sudo gem install rubocop", { cwd: repoPath });
 
     // Filter for Ruby files
     const rubyFiles = filePaths.filter((file) => file.endsWith(".rb"));

@@ -317,30 +317,49 @@ async function analyzeCode(
 ): Promise<Array<ReviewComment>> {
   const comments: Array<ReviewComment> = [];
 
+  console.log(`Analyzing ${parsedDiff.length} files in the diff`);
+  
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
 
+    console.log(`Analyzing file: ${file.to}`);
     const fileContent = file.to ? fileContexts.get(file.to) ?? null : null;
+    
+    if (!fileContent) {
+      console.log(`No content found for file: ${file.to}`);
+    } else {
+      console.log(`Found content for file: ${file.to}, length: ${fileContent.length} characters`);
+    }
 
     // Add extension validation
     if (file.to && fileContent) {
       const extensionError = validateFileExtension(file.to, fileContent);
       if (extensionError) {
+        console.log(`Found extension error for file: ${file.to}`);
         comments.push(extensionError);
       }
     }
 
+    console.log(`File ${file.to} has ${file.chunks?.length || 0} chunks`);
+    
     for (const chunk of file.chunks) {
+      console.log(`Processing chunk with ${chunk.changes.length} changes`);
       const prompt = createPrompt(file, chunk, prDetails, fileContent);
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
+        console.log(`Received AI response with ${aiResponse.length} comments`);
         const newComments = createComment(file, chunk, aiResponse);
         if (newComments) {
+          console.log(`Created ${newComments.length} comments for file: ${file.to}`);
           comments.push(...newComments);
         }
+      } else {
+        console.log(`No AI response received for chunk in file: ${file.to}`);
       }
     }
   }
+  
+  console.log(`Total comments generated: ${comments.length}`);
   return comments;
 }
 
@@ -433,6 +452,8 @@ async function getAIResponse(prompt: string): Promise<Array<{
   };
 
   try {
+    console.log("Sending prompt to AI model:", TOGETHER_API_MODEL);
+    
     const response = await together.chat.completions.create({
       ...queryConfig,
       messages: [
@@ -448,6 +469,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
       ],
     });
 
+    console.log("Received response from AI model");
     const res = response.choices[0].message?.content?.trim() || "{}";
     try {
       // Remove any markdown formatting that might be present
@@ -455,11 +477,14 @@ async function getAIResponse(prompt: string): Promise<Array<{
         .replace(/```[a-z]*\n/g, "")
         .replace(/```/g, "")
         .trim();
+      console.log("Cleaned JSON:", cleanJson.substring(0, 200) + "...");
+      
       const parsed = JSON.parse(cleanJson);
       if (!parsed.reviews || !Array.isArray(parsed.reviews)) {
         console.warn("Invalid response format from AI");
         return [];
       }
+      console.log(`Found ${parsed.reviews.length} review comments from AI`);
       return parsed.reviews;
     } catch (parseError) {
       console.error("Failed to parse AI response:", parseError);
@@ -761,22 +786,31 @@ async function main() {
   // Get the current commit SHA
   const currentCommitSha = eventData.after || eventData.pull_request.head.sha;
 
+  console.log("PR Details:", JSON.stringify(prDetails, null, 2));
+  console.log("Event type:", eventData.action);
+  
   // Fetch previous reviews first
   const historicalReviews = await getPreviousReviews(
     prDetails.owner,
     prDetails.repo,
     prDetails.pull_number
   );
+  
+  console.log(`Found ${historicalReviews.length} historical reviews`);
 
   if (eventData.action === "opened") {
+    console.log("Getting diff for newly opened PR");
     diffResult = await getDiff(
       prDetails.owner,
       prDetails.repo,
       prDetails.pull_number
     );
   } else if (eventData.action === "synchronize") {
+    console.log("Getting diff for synchronized PR");
     const newBaseSha = eventData.before;
     const newHeadSha = eventData.after;
+    
+    console.log(`Comparing commits: ${newBaseSha} -> ${newHeadSha}`);
 
     const response = await octokit.repos.compareCommits({
       headers: {
@@ -792,10 +826,15 @@ async function main() {
       diff: String(response.data),
       fileContexts: new Map(),
     };
+    
+    console.log(`Diff length: ${diffResult.diff.length} characters`);
 
     const parsedDiff = parseDiff(String(response.data));
+    console.log(`Parsed diff contains ${parsedDiff.length} files`);
+    
     for (const file of parsedDiff) {
       if (file.to && file.to !== "/dev/null") {
+        console.log(`Fetching content for file: ${file.to}`);
         const fileContent = await getFileContent(
           prDetails.owner,
           prDetails.repo,
@@ -803,7 +842,10 @@ async function main() {
           newHeadSha
         );
         if (fileContent) {
+          console.log(`Got content for file: ${file.to}, length: ${fileContent.length} characters`);
           diffResult.fileContexts.set(file.to, fileContent);
+        } else {
+          console.log(`Failed to get content for file: ${file.to}`);
         }
       }
     }
@@ -816,19 +858,30 @@ async function main() {
     console.log("No diff found");
     return;
   }
+  
+  console.log(`Diff result contains ${diffResult.fileContexts.size} files with content`);
 
   const parsedDiff = parseDiff(diffResult.diff);
+  console.log(`Parsed diff contains ${parsedDiff.length} files`);
 
   const excludePatterns = core
     .getInput("exclude")
     .split(",")
     .map((s) => s.trim());
+    
+  console.log(`Exclude patterns: ${JSON.stringify(excludePatterns)}`);
 
   const filteredDiff = parsedDiff.filter((file) => {
-    return !excludePatterns.some((pattern) =>
+    const shouldExclude = excludePatterns.some((pattern) =>
       minimatch(file.to ?? "", pattern)
     );
+    if (shouldExclude) {
+      console.log(`Excluding file: ${file.to}`);
+    }
+    return !shouldExclude;
   });
+  
+  console.log(`After filtering, diff contains ${filteredDiff.length} files`);
 
   // Get list of changed files for quality metrics
   const changedFiles = filteredDiff

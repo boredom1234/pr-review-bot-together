@@ -196,7 +196,7 @@ jobs:
       # Install RuboCop if Ruby is detected
       - name: Install RuboCop
         if: steps.check-ruby.outputs.has_ruby == 'true'
-        run: gem install rubocop
+        run: sudo gem install rubocop
       
       # Set up Ruby with bundler caching only if Gemfile exists
       - name: Set up Ruby with cache
@@ -277,7 +277,7 @@ jobs:
           # Install RuboCop if Ruby is detected
           if [ "${{ steps.check-ruby.outputs.has_ruby }}" = "true" ]; then
             echo "Installing RuboCop..."
-            gem install rubocop
+            sudo gem install rubocop
           fi
       
       # Check file structure and permissions
@@ -304,17 +304,16 @@ jobs:
           # deepseek-ai/DeepSeek-V3                                        $1.25
           # deepseek-ai/DeepSeek-R1                                        $3.00 / $7.00
           TOGETHER_API_MODEL: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
-          exclude: '*.md,*.txt,!src/main.ts,!src/qualityMetrics.ts'  # Exclude markdown and text files but explicitly include main.ts and qualityMetrics.ts
+          exclude: '*.md,*.txt'  # Only exclude markdown and text files
           
           # Quality metrics options
           enable_quality_metrics: 'true'
-          quality_tools: 'eslint,pylint,golint,rubocop'  # Explicitly specify tools instead of 'auto'
+          quality_tools: 'eslint,pylint,golint'  # Remove rubocop due to permission issues
           quality_config_paths: '{"eslint":".eslintrc.json","pylint":"pylintrc"}'  # optional: custom config paths
           ignore_rules: '{"eslint":["no-console","no-unused-vars"],"pylint":["missing-docstring"]}'  # optional: rules to ignore
-          ignore_files: '**/*.test.js,**/*.spec.js,**/vendor/**,!src/main.ts,!src/qualityMetrics.ts'  # Exclude test files but explicitly include main.ts and qualityMetrics.ts
+          ignore_files: '**/*.test.js,**/*.spec.js,**/vendor/**'  # Exclude test files
           fail_on_quality_issues: 'false'  # Set to false to prevent workflow failure
           max_critical_issues: '-1'  # Set to -1 to disable failing on critical issues
           max_warning_issues: '-1'
           max_suggestion_issues: '-1'
           comment_mode: 'all'  # Comment on all issues
-          debug: 'true'  # Enable debug mode to get more information

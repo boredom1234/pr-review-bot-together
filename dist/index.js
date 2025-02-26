@@ -304,31 +304,48 @@ function validateFileExtension(filePath, fileContent) {
     return null;
 }
 function analyzeCode(parsedDiff, prDetails, fileContexts) {
-    var _a;
+    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
         const comments = [];
+        console.log(`Analyzing ${parsedDiff.length} files in the diff`);
         for (const file of parsedDiff) {
             if (file.to === "/dev/null")
                 continue; // Ignore deleted files
+            console.log(`Analyzing file: ${file.to}`);
             const fileContent = file.to ? (_a = fileContexts.get(file.to)) !== null && _a !== void 0 ? _a : null : null;
+            if (!fileContent) {
+                console.log(`No content found for file: ${file.to}`);
+            }
+            else {
+                console.log(`Found content for file: ${file.to}, length: ${fileContent.length} characters`);
+            }
             // Add extension validation
             if (file.to && fileContent) {
                 const extensionError = validateFileExtension(file.to, fileContent);
                 if (extensionError) {
+                    console.log(`Found extension error for file: ${file.to}`);
                     comments.push(extensionError);
                 }
             }
+            console.log(`File ${file.to} has ${((_b = file.chunks) === null || _b === void 0 ? void 0 : _b.length) || 0} chunks`);
             for (const chunk of file.chunks) {
+                console.log(`Processing chunk with ${chunk.changes.length} changes`);
                 const prompt = createPrompt(file, chunk, prDetails, fileContent);
                 const aiResponse = yield getAIResponse(prompt);
                 if (aiResponse) {
+                    console.log(`Received AI response with ${aiResponse.length} comments`);
                     const newComments = createComment(file, chunk, aiResponse);
                     if (newComments) {
+                        console.log(`Created ${newComments.length} comments for file: ${file.to}`);
                         comments.push(...newComments);
                     }
                 }
+                else {
+                    console.log(`No AI response received for chunk in file: ${file.to}`);
+                }
             }
         }
+        console.log(`Total comments generated: ${comments.length}`);
         return comments;
     });
 }
@@ -387,6 +404,7 @@ function getAIResponse(prompt) {
             presence_penalty: 0.1,
         };
         try {
+            console.log("Sending prompt to AI model:", TOGETHER_API_MODEL);
             const response = yield together.chat.completions.create(Object.assign(Object.assign({}, queryConfig), { messages: [
                     {
                         role: "system",
@@ -397,6 +415,7 @@ function getAIResponse(prompt) {
                         content: prompt,
                     },
                 ] }));
+            console.log("Received response from AI model");
             const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
             try {
                 // Remove any markdown formatting that might be present
@@ -404,11 +423,13 @@ function getAIResponse(prompt) {
                     .replace(/```[a-z]*\n/g, "")
                     .replace(/```/g, "")
                     .trim();
+                console.log("Cleaned JSON:", cleanJson.substring(0, 200) + "...");
                 const parsed = JSON.parse(cleanJson);
                 if (!parsed.reviews || !Array.isArray(parsed.reviews)) {
                     console.warn("Invalid response format from AI");
                     return [];
                 }
+                console.log(`Found ${parsed.reviews.length} review comments from AI`);
                 return parsed.reviews;
             }
             catch (parseError) {
@@ -639,14 +660,20 @@ function main() {
         const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
         // Get the current commit SHA
         const currentCommitSha = eventData.after || eventData.pull_request.head.sha;
+        console.log("PR Details:", JSON.stringify(prDetails, null, 2));
+        console.log("Event type:", eventData.action);
         // Fetch previous reviews first
         const historicalReviews = yield getPreviousReviews(prDetails.owner, prDetails.repo, prDetails.pull_number);
+        console.log(`Found ${historicalReviews.length} historical reviews`);
         if (eventData.action === "opened") {
+            console.log("Getting diff for newly opened PR");
             diffResult = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
         }
         else if (eventData.action === "synchronize") {
+            console.log("Getting diff for synchronized PR");
             const newBaseSha = eventData.before;
             const newHeadSha = eventData.after;
+            console.log(`Comparing commits: ${newBaseSha} -> ${newHeadSha}`);
             const response = yield octokit.repos.compareCommits({
                 headers: {
                     accept: "application/vnd.github.v3.diff",
@@ -660,12 +687,19 @@ function main() {
                 diff: String(response.data),
                 fileContexts: new Map(),
             };
+            console.log(`Diff length: ${diffResult.diff.length} characters`);
             const parsedDiff = (0, parse_diff_1.default)(String(response.data));
+            console.log(`Parsed diff contains ${parsedDiff.length} files`);
             for (const file of parsedDiff) {
                 if (file.to && file.to !== "/dev/null") {
+                    console.log(`Fetching content for file: ${file.to}`);
                     const fileContent = yield getFileContent(prDetails.owner, prDetails.repo, file.to, newHeadSha);
                     if (fileContent) {
+                        console.log(`Got content for file: ${file.to}, length: ${fileContent.length} characters`);
                         diffResult.fileContexts.set(file.to, fileContent);
+                    }
+                    else {
+                        console.log(`Failed to get content for file: ${file.to}`);
                     }
                 }
             }
@@ -678,14 +712,22 @@ function main() {
             console.log("No diff found");
             return;
         }
+        console.log(`Diff result contains ${diffResult.fileContexts.size} files with content`);
         const parsedDiff = (0, parse_diff_1.default)(diffResult.diff);
+        console.log(`Parsed diff contains ${parsedDiff.length} files`);
         const excludePatterns = core
             .getInput("exclude")
             .split(",")
             .map((s) => s.trim());
+        console.log(`Exclude patterns: ${JSON.stringify(excludePatterns)}`);
         const filteredDiff = parsedDiff.filter((file) => {
-            return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
+            const shouldExclude = excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
+            if (shouldExclude) {
+                console.log(`Excluding file: ${file.to}`);
+            }
+            return !shouldExclude;
         });
+        console.log(`After filtering, diff contains ${filteredDiff.length} files`);
         // Get list of changed files for quality metrics
         const changedFiles = filteredDiff
             .filter((file) => file.to && file.to !== "/dev/null")
@@ -1124,7 +1166,7 @@ function runRubocop(repoPath, filePaths, configPath) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             // Install RuboCop if not already installed
-            yield execPromise("gem install rubocop", { cwd: repoPath });
+            yield execPromise("sudo gem install rubocop", { cwd: repoPath });
             // Filter for Ruby files
             const rubyFiles = filePaths.filter((file) => file.endsWith(".rb"));
             if (rubyFiles.length === 0) {

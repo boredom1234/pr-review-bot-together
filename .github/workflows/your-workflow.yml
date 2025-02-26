@@ -19,20 +19,35 @@ jobs:
       - name: Check for Node.js project
         id: check-node
         run: |
-          if [ -f "package.json" ]; then
+          if [ -n "$(find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -type f -not -path "*/\.*" | head -1)" ]; then
             echo "has_node=true" >> $GITHUB_OUTPUT
+            # Check if package.json exists
+            if [ -f "package.json" ]; then
+              echo "has_node_deps=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_node_deps=false" >> $GITHUB_OUTPUT
+            fi
           else
             echo "has_node=false" >> $GITHUB_OUTPUT
+            echo "has_node_deps=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up Node.js
-        if: steps.check-node.outputs.has_node == 'true'
+      # Set up Node.js with dependency caching only if package.json exists
+      - name: Set up Node.js with cache
+        if: steps.check-node.outputs.has_node == 'true' && steps.check-node.outputs.has_node_deps == 'true'
         uses: actions/setup-node@v3
         with:
           node-version: '16'
           cache: 'npm'
           cache-dependency-path: |
             **/package.json
+
+      # Set up Node.js without dependency caching if no package.json exists
+      - name: Set up Node.js without cache
+        if: steps.check-node.outputs.has_node == 'true' && steps.check-node.outputs.has_node_deps == 'false'
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
       
       # Set up Python for Pylint (only if Python files exist)
       - name: Check for Python project
@@ -40,12 +55,20 @@ jobs:
         run: |
           if [ -n "$(find . -name "*.py" -type f -not -path "*/\.*" | head -1)" ]; then
             echo "has_python=true" >> $GITHUB_OUTPUT
+            # Check if any Python dependency files exist
+            if [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "Pipfile" ] || [ -f "Pipfile.lock" ]; then
+              echo "has_python_deps=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_python_deps=false" >> $GITHUB_OUTPUT
+            fi
           else
             echo "has_python=false" >> $GITHUB_OUTPUT
+            echo "has_python_deps=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up Python
-        if: steps.check-python.outputs.has_python == 'true'
+      # Set up Python with dependency caching only if dependency files exist
+      - name: Set up Python with cache
+        if: steps.check-python.outputs.has_python == 'true' && steps.check-python.outputs.has_python_deps == 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -56,6 +79,14 @@ jobs:
             **/setup.py
             **/Pipfile
             **/Pipfile.lock
+
+      # Set up Python without dependency caching if no dependency files exist
+      - name: Set up Python without cache
+        if: steps.check-python.outputs.has_python == 'true' && steps.check-python.outputs.has_python_deps == 'false'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
       
       # Set up Go for Golint (only if Go files exist)
       - name: Check for Go project
@@ -63,12 +94,20 @@ jobs:
         run: |
           if [ -n "$(find . -name "*.go" -type f -not -path "*/\.*" | head -1)" ]; then
             echo "has_go=true" >> $GITHUB_OUTPUT
+            # Check if go.mod exists
+            if [ -f "go.mod" ] || [ -f "go.sum" ]; then
+              echo "has_go_deps=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_go_deps=false" >> $GITHUB_OUTPUT
+            fi
           else
             echo "has_go=false" >> $GITHUB_OUTPUT
+            echo "has_go_deps=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up Go
-        if: steps.check-go.outputs.has_go == 'true'
+      # Set up Go with dependency caching only if go.mod exists
+      - name: Set up Go with cache
+        if: steps.check-go.outputs.has_go == 'true' && steps.check-go.outputs.has_go_deps == 'true'
         uses: actions/setup-go@v4
         with:
           go-version: '1.19'
@@ -76,6 +115,13 @@ jobs:
           cache-dependency-path: |
             **/go.mod
             **/go.sum
+
+      # Set up Go without dependency caching if no go.mod exists
+      - name: Set up Go without cache
+        if: steps.check-go.outputs.has_go == 'true' && steps.check-go.outputs.has_go_deps == 'false'
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.19'
       
       # Set up Java for Checkstyle (only if Java files exist)
       - name: Check for Java project
@@ -83,12 +129,20 @@ jobs:
         run: |
           if [ -n "$(find . -name "*.java" -type f -not -path "*/\.*" | head -1)" ]; then
             echo "has_java=true" >> $GITHUB_OUTPUT
+            # Check if any Java dependency files exist
+            if [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+              echo "has_java_deps=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_java_deps=false" >> $GITHUB_OUTPUT
+            fi
           else
             echo "has_java=false" >> $GITHUB_OUTPUT
+            echo "has_java_deps=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up Java
-        if: steps.check-java.outputs.has_java == 'true'
+      # Set up Java with dependency caching only if dependency files exist
+      - name: Set up Java with cache
+        if: steps.check-java.outputs.has_java == 'true' && steps.check-java.outputs.has_java_deps == 'true'
         uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
@@ -98,6 +152,14 @@ jobs:
             **/pom.xml
             **/build.gradle
             **/build.gradle.kts
+
+      # Set up Java without dependency caching if no dependency files exist
+      - name: Set up Java without cache
+        if: steps.check-java.outputs.has_java == 'true' && steps.check-java.outputs.has_java_deps == 'false'
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
       
       # Set up Ruby for RuboCop (only if Ruby files exist)
       - name: Check for Ruby project
@@ -105,16 +167,32 @@ jobs:
         run: |
           if [ -n "$(find . -name "*.rb" -type f -not -path "*/\.*" | head -1)" ]; then
             echo "has_ruby=true" >> $GITHUB_OUTPUT
+            # Check if any Ruby dependency files exist
+            if [ -f "Gemfile" ] || [ -f "Gemfile.lock" ]; then
+              echo "has_ruby_deps=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_ruby_deps=false" >> $GITHUB_OUTPUT
+            fi
           else
             echo "has_ruby=false" >> $GITHUB_OUTPUT
+            echo "has_ruby_deps=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up Ruby
-        if: steps.check-ruby.outputs.has_ruby == 'true'
+      # Set up Ruby with bundler caching only if Gemfile exists
+      - name: Set up Ruby with cache
+        if: steps.check-ruby.outputs.has_ruby == 'true' && steps.check-ruby.outputs.has_ruby_deps == 'true'
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.1'
           bundler-cache: true
+
+      # Set up Ruby without bundler caching if no Gemfile exists
+      - name: Set up Ruby without cache
+        if: steps.check-ruby.outputs.has_ruby == 'true' && steps.check-ruby.outputs.has_ruby_deps == 'false'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+          bundler-cache: false
       
       # Cache quality tools with fallback paths
       - name: Cache quality tools

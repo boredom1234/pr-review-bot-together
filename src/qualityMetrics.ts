@@ -264,28 +264,32 @@ async function runGolint(
       return { issues: [] };
     }
 
-    // Run golint
-    const { stdout } = await execPromise(`golint -json ${goFiles.join(" ")}`, {
+    // Run golint (without -json flag)
+    const { stdout } = await execPromise(`golint ${goFiles.join(" ")}`, {
       cwd: repoPath,
     });
 
-    // Parse the output (assuming JSON format)
-    const golintResults = stdout.trim()
-      ? JSON.parse(`[${stdout.trim().split("\n").join(",")}]`)
-      : [];
-
-    // Transform golint results to our format
+    // Parse the output (plain text format)
     const issues: QualityIssue[] = [];
-
-    golintResults.forEach((result: any) => {
-      issues.push({
-        path: result.file,
-        line: result.line,
-        message: result.message,
-        rule: "golint",
-        severity: "warning", // Golint doesn't have severity levels, default to warning
-      });
-    });
+    
+    // Golint output format is: file:line:column: message
+    const lines = stdout.trim().split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      
+      const match = line.match(/^(.+):(\d+):\d+: (.+)$/);
+      if (match) {
+        const [, filePath, lineNum, message] = match;
+        
+        issues.push({
+          path: filePath.replace(`${repoPath}/`, ""),
+          line: parseInt(lineNum, 10),
+          message: message,
+          rule: "golint",
+          severity: "warning", // Golint doesn't have severity levels, default to warning
+        });
+      }
+    }
 
     // Calculate metrics
     const metrics = {

@@ -356,7 +356,7 @@ function createPrompt(file, chunk, prDetails, fileContent) {
         : "";
     return `You are a strict code reviewer. Your task is to thoroughly analyze the code and find potential issues, bugs, and improvements. Instructions:
 
-- Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "severity": "<severity>"}]}
+- Provide the response in following JSON format with no extra text or formatting: {"reviews":[{"lineNumber":123,"reviewComment":"Your comment here","severity":"critical|warning|suggestion"}]}
 - Severity levels:
   - "critical": For issues that must be fixed (security issues, bugs, broken functionality, performance issues)
   - "warning": For code quality issues that should be addressed (maintainability, best practices, potential edge cases)
@@ -369,8 +369,7 @@ function createPrompt(file, chunk, prDetails, fileContent) {
   - Check for code quality and maintainability issues
 - Do not give positive comments or compliments
 - Always try to find at least one issue to improve the code
-- Write the comment in GitHub Markdown format
-- Consider the full file context when making suggestions
+- Keep your response as valid JSON only - no markdown, no extra text
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account.
   
@@ -408,7 +407,7 @@ function getAIResponse(prompt) {
             const response = yield together.chat.completions.create(Object.assign(Object.assign({}, queryConfig), { messages: [
                     {
                         role: "system",
-                        content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review. IMPORTANT: Your response must be valid JSON without any markdown formatting.",
+                        content: "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review. IMPORTANT: Your response must be ONLY valid JSON without any markdown formatting or additional text. The exact format should be: {\"reviews\":[{\"lineNumber\":123,\"reviewComment\":\"Your comment here\",\"severity\":\"critical|warning|suggestion\"}]}",
                     },
                     {
                         role: "user",
@@ -419,14 +418,88 @@ function getAIResponse(prompt) {
             const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
             try {
                 // Remove any markdown formatting that might be present
-                const cleanJson = res
+                let cleanJson = res
                     .replace(/```[a-z]*\n/g, "")
                     .replace(/```/g, "")
                     .trim();
+                // Try to extract JSON if it's wrapped in text
+                const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    cleanJson = jsonMatch[0];
+                }
                 console.log("Cleaned JSON:", cleanJson.substring(0, 200) + "...");
-                const parsed = JSON.parse(cleanJson);
-                if (!parsed.reviews || !Array.isArray(parsed.reviews)) {
+                // Try to parse the JSON
+                let parsed;
+                try {
+                    parsed = JSON.parse(cleanJson);
+                }
+                catch (jsonError) {
+                    // If parsing fails, try to fix common JSON issues
+                    console.log("Initial JSON parsing failed, attempting to fix JSON format");
+                    // Replace any potential line breaks within strings
+                    cleanJson = cleanJson.replace(/("(?:\\.|[^"\\])*"):(\s*)"((?:\\.|[^"\\])*)(?:\n|\r\n?)((?:\\.|[^"\\])*)"/g, '$1:$2"$3 $4"');
+                    // Try to parse again
+                    try {
+                        parsed = JSON.parse(cleanJson);
+                    }
+                    catch (secondError) {
+                        // If still failing, try a more aggressive approach - manually extract the reviews
+                        console.log("Second JSON parsing attempt failed, trying manual extraction");
+                        const reviewsMatch = cleanJson.match(/"reviews"\s*:\s*\[([\s\S]*?)\]/);
+                        if (reviewsMatch) {
+                            const reviewsContent = reviewsMatch[1];
+                            const reviewItems = reviewsContent.split('},');
+                            const reviews = [];
+                            for (let item of reviewItems) {
+                                if (!item.trim().endsWith('}')) {
+                                    item = item + '}';
+                                }
+                                try {
+                                    const review = JSON.parse(item);
+                                    reviews.push(review);
+                                }
+                                catch (itemError) {
+                                    console.log(`Failed to parse review item: ${item}`);
+                                }
+                            }
+                            parsed = { reviews };
+                        }
+                    }
+                }
+                if (!parsed || !parsed.reviews || !Array.isArray(parsed.reviews)) {
                     console.warn("Invalid response format from AI");
+                    // Last resort: try to manually extract the reviews using regex
+                    const lineNumberMatches = res.match(/"lineNumber"\s*:\s*(\d+)/g);
+                    const reviewCommentMatches = res.match(/"reviewComment"\s*:\s*"([^"]*)"/g);
+                    const severityMatches = res.match(/"severity"\s*:\s*"([^"]*)"/g);
+                    if (lineNumberMatches && reviewCommentMatches && lineNumberMatches.length === reviewCommentMatches.length) {
+                        console.log("Attempting to extract reviews using regex");
+                        const manualReviews = [];
+                        for (let i = 0; i < lineNumberMatches.length; i++) {
+                            const lineNumberMatch = lineNumberMatches[i].match(/\d+/);
+                            const reviewCommentMatch = reviewCommentMatches[i].match(/"reviewComment"\s*:\s*"([^"]*)"/);
+                            if (lineNumberMatch && reviewCommentMatch) {
+                                const lineNumber = lineNumberMatch[0];
+                                const reviewComment = reviewCommentMatch[1];
+                                let severity = "warning";
+                                if (severityMatches && i < severityMatches.length) {
+                                    const severityMatch = severityMatches[i].match(/"severity"\s*:\s*"([^"]*)"/);
+                                    if (severityMatch && severityMatch[1]) {
+                                        const severityValue = severityMatch[1];
+                                        if (severityValue === "critical" || severityValue === "warning" || severityValue === "suggestion") {
+                                            severity = severityValue;
+                                        }
+                                    }
+                                }
+                                manualReviews.push({
+                                    lineNumber,
+                                    reviewComment,
+                                    severity
+                                });
+                            }
+                        }
+                        return manualReviews;
+                    }
                     return [];
                 }
                 console.log(`Found ${parsed.reviews.length} review comments from AI`);
@@ -1062,25 +1135,29 @@ function runGolint(repoPath, filePaths, configPath) {
             if (goFiles.length === 0) {
                 return { issues: [] };
             }
-            // Run golint
-            const { stdout } = yield execPromise(`golint -json ${goFiles.join(" ")}`, {
+            // Run golint (without -json flag)
+            const { stdout } = yield execPromise(`golint ${goFiles.join(" ")}`, {
                 cwd: repoPath,
             });
-            // Parse the output (assuming JSON format)
-            const golintResults = stdout.trim()
-                ? JSON.parse(`[${stdout.trim().split("\n").join(",")}]`)
-                : [];
-            // Transform golint results to our format
+            // Parse the output (plain text format)
             const issues = [];
-            golintResults.forEach((result) => {
-                issues.push({
-                    path: result.file,
-                    line: result.line,
-                    message: result.message,
-                    rule: "golint",
-                    severity: "warning", // Golint doesn't have severity levels, default to warning
-                });
-            });
+            // Golint output format is: file:line:column: message
+            const lines = stdout.trim().split('\n');
+            for (const line of lines) {
+                if (!line.trim())
+                    continue;
+                const match = line.match(/^(.+):(\d+):\d+: (.+)$/);
+                if (match) {
+                    const [, filePath, lineNum, message] = match;
+                    issues.push({
+                        path: filePath.replace(`${repoPath}/`, ""),
+                        line: parseInt(lineNum, 10),
+                        message: message,
+                        rule: "golint",
+                        severity: "warning", // Golint doesn't have severity levels, default to warning
+                    });
+                }
+            }
             // Calculate metrics
             const metrics = {
                 totalIssues: issues.length,

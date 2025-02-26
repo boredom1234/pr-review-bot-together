@@ -1,6 +1,454 @@
 require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 9059:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.runReSharperAnalysis = exports.runStyleCopAnalysis = exports.runRoslynAnalysis = exports.ensureEditorConfig = exports.installRoslynAnalyzers = exports.findSolutionFile = exports.ensureDotNetSdk = void 0;
+const child_process_1 = __nccwpck_require__(2081);
+const util = __importStar(__nccwpck_require__(3837));
+const path = __importStar(__nccwpck_require__(1017));
+const fs = __importStar(__nccwpck_require__(7147));
+const core = __importStar(__nccwpck_require__(2186));
+const execPromise = util.promisify(child_process_1.exec);
+// Helper function to ensure .NET SDK is available
+function ensureDotNetSdk() {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const { stdout } = yield execPromise('dotnet --version');
+            core.info(`Found .NET SDK version: ${stdout.trim()}`);
+            return true;
+        }
+        catch (error) {
+            core.error('Error: .NET SDK is not installed or not in PATH');
+            return false;
+        }
+    });
+}
+exports.ensureDotNetSdk = ensureDotNetSdk;
+// Helper function to find solution file
+function findSolutionFile(repoPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const files = fs.readdirSync(repoPath);
+            const slnFile = files.find(file => file.endsWith('.sln'));
+            return slnFile ? path.join(repoPath, slnFile) : null;
+        }
+        catch (error) {
+            core.error(`Error finding solution file: ${error}`);
+            return null;
+        }
+    });
+}
+exports.findSolutionFile = findSolutionFile;
+// Install Roslyn analyzers
+function installRoslynAnalyzers(repoPath, analyzers = []) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const defaultAnalyzers = [
+            'Microsoft.CodeAnalysis.NetAnalyzers',
+            'Microsoft.CodeAnalysis.CSharp.CodeStyle',
+            'Microsoft.CodeQuality.Analyzers',
+            'Microsoft.NetCore.Analyzers',
+            'Roslynator.Analyzers',
+            'SecurityCodeScan.VS2019'
+        ];
+        const allAnalyzers = [...new Set([...defaultAnalyzers, ...analyzers])];
+        for (const analyzer of allAnalyzers) {
+            try {
+                core.info(`Installing analyzer: ${analyzer}`);
+                yield execPromise(`dotnet add package ${analyzer} -v quiet`, { cwd: repoPath });
+            }
+            catch (error) {
+                core.warning(`Failed to install analyzer ${analyzer}: ${error}`);
+            }
+        }
+    });
+}
+exports.installRoslynAnalyzers = installRoslynAnalyzers;
+// Create default .editorconfig if it doesn't exist
+function ensureEditorConfig(repoPath, configPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const defaultConfig = configPath || path.join(repoPath, '.editorconfig');
+        if (!fs.existsSync(defaultConfig)) {
+            const defaultContent = `root = true
+
+[*.{cs,vb}]
+dotnet_analyzer_diagnostic.severity = warning
+
+# Code style defaults
+dotnet_sort_system_directives_first = true
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+# Language keywords vs BCL types preferences
+dotnet_style_predefined_type_for_locals_parameters_members = true:suggestion
+dotnet_style_predefined_type_for_member_access = true:suggestion
+
+# Parentheses preferences
+dotnet_style_parentheses_in_arithmetic_binary_operators = always_for_clarity:suggestion
+dotnet_style_parentheses_in_other_binary_operators = always_for_clarity:suggestion
+dotnet_style_parentheses_in_other_operators = never_if_unnecessary:suggestion
+dotnet_style_parentheses_in_relational_binary_operators = always_for_clarity:suggestion
+
+# Modifier preferences
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:suggestion
+
+[*.cs]
+# var preferences
+csharp_style_var_elsewhere = true:suggestion
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+
+# Expression-bodied members
+csharp_style_expression_bodied_accessors = true:suggestion
+csharp_style_expression_bodied_constructors = false:suggestion
+csharp_style_expression_bodied_methods = false:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+
+# Pattern matching preferences
+csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
+csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
+csharp_style_prefer_switch_expression = true:suggestion
+
+# Null-checking preferences
+csharp_style_conditional_delegate_call = true:suggestion
+
+# Code-block preferences
+csharp_prefer_braces = true:suggestion`;
+            fs.writeFileSync(defaultConfig, defaultContent);
+            core.info(`Created default .editorconfig at ${defaultConfig}`);
+        }
+        return defaultConfig;
+    });
+}
+exports.ensureEditorConfig = ensureEditorConfig;
+// Run Roslyn analysis
+function runRoslynAnalysis(repoPath, filePaths, config) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Ensure .NET SDK is available
+            if (!(yield ensureDotNetSdk())) {
+                return { issues: [] };
+            }
+            // Filter for C# files
+            const csFiles = filePaths.filter(file => file.endsWith('.cs'));
+            if (csFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Install analyzers
+            yield installRoslynAnalyzers(repoPath, config === null || config === void 0 ? void 0 : config.additionalAnalyzers);
+            // Ensure .editorconfig exists
+            const editorConfigPath = yield ensureEditorConfig(repoPath, config === null || config === void 0 ? void 0 : config.editorConfigPath);
+            // Build command with analysis options
+            const buildCommand = [
+                'dotnet build',
+                '/p:GenerateFullPaths=true',
+                (config === null || config === void 0 ? void 0 : config.treatWarningsAsErrors) ? '/warnaserror' : '/warnaserror-',
+                '/v:detailed',
+                `/p:AnalysisLevel=latest`,
+                `/p:EnforceCodeStyleInBuild=true`,
+                `/p:RunAnalyzersDuringBuild=true`,
+                `/p:RunAnalyzersDuringLiveAnalysis=true`,
+                `/p:TreatWarningsAsErrors=${(config === null || config === void 0 ? void 0 : config.treatWarningsAsErrors) || 'false'}`
+            ].filter(Boolean).join(' ');
+            // Run analysis
+            const { stdout, stderr } = yield execPromise(buildCommand, { cwd: repoPath });
+            const output = stdout + '\n' + stderr;
+            // Parse diagnostics
+            const issues = [];
+            const diagnosticRegex = /^(.*?)\((\d+),\d+\):\s+(warning|error)\s+(\w+\d+):\s+(.*)$/gm;
+            let match;
+            while ((match = diagnosticRegex.exec(output)) !== null) {
+                const [, filePath, line, level, ruleId, message] = match;
+                const relativePath = path.relative(repoPath, filePath);
+                issues.push({
+                    path: relativePath,
+                    line: parseInt(line, 10),
+                    message: message.trim(),
+                    rule: ruleId,
+                    severity: level === 'error' ? 'critical' : 'warning',
+                    source: 'roslyn'
+                });
+            }
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter(i => i.severity === 'critical').length,
+                warningIssues: issues.filter(i => i.severity === 'warning').length,
+                filesWithIssues: new Set(issues.map(i => i.path)).size,
+                ruleCategories: new Set(issues.map(i => i.rule.split('.')[0])).size,
+                topIssuesJson: JSON.stringify(Object.entries(issues.reduce((acc, issue) => {
+                    acc[issue.rule] = (acc[issue.rule] || 0) + 1;
+                    return acc;
+                }, {}))
+                    .sort(([, a], [, b]) => b - a)
+                    .slice(0, 5)
+                    .reduce((acc, [rule, count]) => (Object.assign(Object.assign({}, acc), { [rule]: count })), {}))
+            };
+            return { issues, metrics };
+        }
+        catch (error) {
+            core.error(`Error running Roslyn analysis: ${error}`);
+            return { issues: [] };
+        }
+    });
+}
+exports.runRoslynAnalysis = runRoslynAnalysis;
+// Run StyleCop analysis
+function runStyleCopAnalysis(repoPath, filePaths, config) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Ensure .NET SDK is available
+            if (!(yield ensureDotNetSdk())) {
+                return { issues: [] };
+            }
+            // Filter for C# files
+            const csFiles = filePaths.filter(file => file.endsWith('.cs'));
+            if (csFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Install StyleCop.Analyzers
+            try {
+                yield execPromise('dotnet add package StyleCop.Analyzers -v quiet', { cwd: repoPath });
+                core.info('Installed StyleCop.Analyzers');
+            }
+            catch (error) {
+                core.error(`Failed to install StyleCop.Analyzers: ${error}`);
+                return { issues: [] };
+            }
+            // Create default stylecop.json if it doesn't exist and no custom config is provided
+            const styleCopJsonPath = (config === null || config === void 0 ? void 0 : config.settings) || path.join(repoPath, 'stylecop.json');
+            if (!fs.existsSync(styleCopJsonPath) && !(config === null || config === void 0 ? void 0 : config.settings)) {
+                const defaultStyleCopConfig = {
+                    "$schema": "https://raw.githubusercontent.com/DotNetAnalyzers/StyleCopAnalyzers/master/StyleCop.Analyzers/StyleCop.Analyzers/Settings/stylecop.schema.json",
+                    "settings": {
+                        "documentationRules": {
+                            "companyName": "YourCompany",
+                            "documentInterfaces": true,
+                            "documentInternalElements": false
+                        },
+                        "layoutRules": {
+                            "newlineAtEndOfFile": "require"
+                        },
+                        "orderingRules": {
+                            "systemUsingDirectivesFirst": true,
+                            "usingDirectivesPlacement": "outsideNamespace"
+                        }
+                    }
+                };
+                fs.writeFileSync(styleCopJsonPath, JSON.stringify(defaultStyleCopConfig, null, 2));
+                core.info(`Created default stylecop.json at ${styleCopJsonPath}`);
+            }
+            // Build command with StyleCop options
+            const buildCommand = [
+                'dotnet build',
+                '/p:GenerateFullPaths=true',
+                (config === null || config === void 0 ? void 0 : config.treatWarningsAsErrors) ? '/warnaserror' : '/warnaserror-',
+                '/v:detailed',
+                `/p:StyleCopEnabled=true`,
+                `/p:StyleCopTreatErrorsAsWarnings=${!(config === null || config === void 0 ? void 0 : config.treatWarningsAsErrors)}`,
+                (config === null || config === void 0 ? void 0 : config.settings) ? `/p:StyleCopSettingsFile=${config.settings}` : ''
+            ].filter(Boolean).join(' ');
+            // Run analysis
+            const { stdout, stderr } = yield execPromise(buildCommand, { cwd: repoPath });
+            const output = stdout + '\n' + stderr;
+            // Parse StyleCop diagnostics
+            const issues = [];
+            const diagnosticRegex = /^(.*?)\((\d+),\d+\):\s+(warning|error)\s+(SA\d+):\s+(.*)$/gm;
+            let match;
+            while ((match = diagnosticRegex.exec(output)) !== null) {
+                const [, filePath, line, level, ruleId, message] = match;
+                const relativePath = path.relative(repoPath, filePath);
+                issues.push({
+                    path: relativePath,
+                    line: parseInt(line, 10),
+                    message: message.trim(),
+                    rule: ruleId,
+                    severity: level === 'error' ? 'critical' : 'warning',
+                    source: 'stylecop'
+                });
+            }
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter(i => i.severity === 'critical').length,
+                warningIssues: issues.filter(i => i.severity === 'warning').length,
+                filesWithIssues: new Set(issues.map(i => i.path)).size,
+                ruleCategories: new Set(issues.map(i => i.rule.substring(0, 4))).size,
+                topIssuesJson: JSON.stringify(Object.entries(issues.reduce((acc, issue) => {
+                    acc[issue.rule] = (acc[issue.rule] || 0) + 1;
+                    return acc;
+                }, {}))
+                    .sort(([, a], [, b]) => b - a)
+                    .slice(0, 5)
+                    .reduce((acc, [rule, count]) => (Object.assign(Object.assign({}, acc), { [rule]: count })), {}))
+            };
+            return { issues, metrics };
+        }
+        catch (error) {
+            core.error(`Error running StyleCop analysis: ${error}`);
+            return { issues: [] };
+        }
+    });
+}
+exports.runStyleCopAnalysis = runStyleCopAnalysis;
+// Run ReSharper CLI analysis
+function runReSharperAnalysis(repoPath, filePaths, config) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Ensure .NET SDK is available
+            if (!(yield ensureDotNetSdk())) {
+                return { issues: [] };
+            }
+            // Filter for C# files
+            const csFiles = filePaths.filter(file => file.endsWith('.cs'));
+            if (csFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Install ReSharper CLI tools
+            try {
+                yield execPromise('dotnet tool install -g JetBrains.ReSharper.GlobalTools', { cwd: repoPath });
+                core.info('Installed ReSharper CLI tools');
+            }
+            catch (error) {
+                // Tool might already be installed
+                core.info('ReSharper CLI tools already installed or installation failed');
+            }
+            // Ensure solution file exists
+            const solutionPath = config.solutionPath || (yield findSolutionFile(repoPath));
+            if (!solutionPath) {
+                core.error('No solution file found');
+                return { issues: [] };
+            }
+            // Create output directory for inspection results
+            const outputDir = path.join(repoPath, 'inspectcode-output');
+            if (!fs.existsSync(outputDir)) {
+                fs.mkdirSync(outputDir);
+            }
+            const outputPath = path.join(outputDir, 'inspection-results.xml');
+            // Build inspection command
+            const inspectCommand = [
+                'jb inspectcode',
+                `"${solutionPath}"`,
+                '--output=' + outputPath,
+                '--format=Xml',
+                '--verbosity=WARN',
+                config.dotsettingsPath ? `--settings="${config.dotsettingsPath}"` : '',
+                '--no-build',
+                '--absolute-paths'
+            ].filter(Boolean).join(' ');
+            // Build the solution first
+            yield execPromise('dotnet build', { cwd: repoPath });
+            core.info('Project built successfully');
+            // Run inspection
+            yield execPromise(inspectCommand, { cwd: repoPath });
+            core.info('ReSharper inspection completed');
+            // Parse inspection results
+            const issues = [];
+            if (fs.existsSync(outputPath)) {
+                const inspectionXml = fs.readFileSync(outputPath, 'utf8');
+                // Parse XML (simplified for example)
+                // In a real implementation, you'd use a proper XML parser
+                const issueMatches = inspectionXml.matchAll(/<Issue.*?TypeId="([^"]+)".*?File="([^"]+)".*?Line="(\d+)".*?Message="([^"]+)".*?Severity="([^"]+)"/g);
+                for (const match of issueMatches) {
+                    const [, ruleId, filePath, line, message, severity] = match;
+                    const relativePath = path.relative(repoPath, filePath);
+                    // Map ReSharper severity to our severity levels
+                    let mappedSeverity;
+                    switch (severity.toLowerCase()) {
+                        case 'error':
+                            mappedSeverity = 'critical';
+                            break;
+                        case 'warning':
+                            mappedSeverity = 'warning';
+                            break;
+                        default:
+                            mappedSeverity = 'suggestion';
+                    }
+                    issues.push({
+                        path: relativePath,
+                        line: parseInt(line, 10),
+                        message: message,
+                        rule: ruleId,
+                        severity: mappedSeverity,
+                        source: 'resharper'
+                    });
+                }
+            }
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter(i => i.severity === 'critical').length,
+                warningIssues: issues.filter(i => i.severity === 'warning').length,
+                suggestionIssues: issues.filter(i => i.severity === 'suggestion').length,
+                filesWithIssues: new Set(issues.map(i => i.path)).size,
+                ruleCategories: new Set(issues.map(i => i.rule.split('.')[0])).size,
+                topIssuesJson: JSON.stringify(Object.entries(issues.reduce((acc, issue) => {
+                    acc[issue.rule] = (acc[issue.rule] || 0) + 1;
+                    return acc;
+                }, {}))
+                    .sort(([, a], [, b]) => b - a)
+                    .slice(0, 5)
+                    .reduce((acc, [rule, count]) => (Object.assign(Object.assign({}, acc), { [rule]: count })), {}))
+            };
+            // Cleanup
+            try {
+                fs.unlinkSync(outputPath);
+                fs.rmdirSync(outputDir);
+            }
+            catch (error) {
+                core.warning(`Failed to cleanup ReSharper output: ${error}`);
+            }
+            return { issues, metrics };
+        }
+        catch (error) {
+            core.error(`Error running ReSharper analysis: ${error}`);
+            return { issues: [] };
+        }
+    });
+}
+exports.runReSharperAnalysis = runReSharperAnalysis;
+
+
+/***/ }),
+
 /***/ 3109:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -995,6 +1443,7 @@ const fs = __importStar(__nccwpck_require__(7147));
 const path = __importStar(__nccwpck_require__(1017));
 const core = __importStar(__nccwpck_require__(2186));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
+const dotnetAnalyzers_1 = __nccwpck_require__(9059);
 const execPromise = util.promisify(child_process_1.exec);
 // Detect which tools to use based on repo content
 function detectTools(repoPath) {
@@ -1074,6 +1523,20 @@ function detectTools(repoPath) {
         }
         catch (error) {
             console.error("Error detecting Rust tools:", error);
+        }
+        // Check for C# files
+        try {
+            const hasCSharpFiles = fs
+                .readdirSync(repoPath)
+                .some((file) => file.endsWith(".cs"));
+            if (hasCSharpFiles) {
+                tools.push("roslyn");
+                tools.push("stylecop");
+                tools.push("resharper");
+            }
+        }
+        catch (error) {
+            console.error("Error detecting C# tools:", error);
         }
         return tools;
     });
@@ -1532,6 +1995,25 @@ function runQualityMetrics(repoPath, changedFiles) {
                     break;
                 case "clippy":
                     result = yield runClippy(repoPath, filteredFiles, configPath);
+                    break;
+                case "roslyn":
+                    result = yield (0, dotnetAnalyzers_1.runRoslynAnalysis)(repoPath, filteredFiles, {
+                        editorConfigPath: configPath || undefined,
+                        treatWarningsAsErrors: false
+                    });
+                    break;
+                case "stylecop":
+                    result = yield (0, dotnetAnalyzers_1.runStyleCopAnalysis)(repoPath, filteredFiles, {
+                        settings: configPath || undefined,
+                        treatWarningsAsErrors: false
+                    });
+                    break;
+                case "resharper":
+                    const resharperSolution = core.getInput("resharper_solution");
+                    result = yield (0, dotnetAnalyzers_1.runReSharperAnalysis)(repoPath, filteredFiles, {
+                        solutionPath: resharperSolution || (yield (0, dotnetAnalyzers_1.findSolutionFile)(repoPath)) || "",
+                        dotsettingsPath: configPath || undefined
+                    });
                     break;
                 // Add more tools as needed
                 default:

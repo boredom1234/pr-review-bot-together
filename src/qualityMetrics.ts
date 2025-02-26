@@ -4,6 +4,17 @@ import * as fs from "fs";
 import * as path from "path";
 import * as core from "@actions/core";
 import minimatch from "minimatch";
+import {
+  DotNetQualityIssue,
+  DotNetToolResult,
+  StyleCopConfig,
+  RoslynConfig,
+  ReSharperConfig,
+  runRoslynAnalysis,
+  runStyleCopAnalysis,
+  runReSharperAnalysis,
+  findSolutionFile
+} from './dotnetAnalyzers';
 
 const execPromise = util.promisify(exec);
 
@@ -101,6 +112,20 @@ async function detectTools(repoPath: string): Promise<string[]> {
     }
   } catch (error) {
     console.error("Error detecting Rust tools:", error);
+  }
+
+  // Check for C# files
+  try {
+    const hasCSharpFiles = fs
+      .readdirSync(repoPath)
+      .some((file) => file.endsWith(".cs"));
+    if (hasCSharpFiles) {
+      tools.push("roslyn");
+      tools.push("stylecop");
+      tools.push("resharper");
+    }
+  } catch (error) {
+    console.error("Error detecting C# tools:", error);
   }
 
   return tools;
@@ -663,6 +688,25 @@ export async function runQualityMetrics(
         break;
       case "clippy":
         result = await runClippy(repoPath, filteredFiles, configPath);
+        break;
+      case "roslyn":
+        result = await runRoslynAnalysis(repoPath, filteredFiles, {
+          editorConfigPath: configPath || undefined,
+          treatWarningsAsErrors: false
+        });
+        break;
+      case "stylecop":
+        result = await runStyleCopAnalysis(repoPath, filteredFiles, {
+          settings: configPath || undefined,
+          treatWarningsAsErrors: false
+        });
+        break;
+      case "resharper":
+        const resharperSolution = core.getInput("resharper_solution");
+        result = await runReSharperAnalysis(repoPath, filteredFiles, {
+          solutionPath: resharperSolution || await findSolutionFile(repoPath) || "",
+          dotsettingsPath: configPath || undefined
+        });
         break;
       // Add more tools as needed
       default:

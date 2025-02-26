@@ -1,4 +1,5 @@
 name: PR Review Bot
+
 on:
   pull_request:
     types: [opened, synchronize]
@@ -13,307 +14,62 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Fetch all history for quality tools
-      
-      # Set up Node.js for ESLint (only if package.json exists)
-      - name: Check for Node.js project
-        id: check-node
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: |
+            6.0.x
+            7.0.x
+
+      - name: Install .NET quality tools
         run: |
-          if [ -n "$(find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -type f -not -path "*/\.*" | head -1)" ]; then
-            echo "has_node=true" >> $GITHUB_OUTPUT
-            # Check if package.json exists
-            if [ -f "package.json" ]; then
-              echo "has_node_deps=true" >> $GITHUB_OUTPUT
-            else
-              echo "has_node_deps=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "has_node=false" >> $GITHUB_OUTPUT
-            echo "has_node_deps=false" >> $GITHUB_OUTPUT
-          fi
+          dotnet tool install -g JetBrains.ReSharper.GlobalTools
+          dotnet add package StyleCop.Analyzers
+          dotnet add package Microsoft.CodeAnalysis.NetAnalyzers
+          dotnet add package Microsoft.CodeAnalysis.CSharp.CodeStyle
+          dotnet add package Roslynator.Analyzers
 
-      # Set up Node.js with dependency caching only if package.json exists
-      - name: Set up Node.js with cache
-        if: steps.check-node.outputs.has_node == 'true' && steps.check-node.outputs.has_node_deps == 'true'
-        uses: actions/setup-node@v3
-        with:
-          node-version: '16'
-          cache: 'npm'
-          cache-dependency-path: |
-            **/package.json
-
-      # Set up Node.js without dependency caching if no package.json exists
-      - name: Set up Node.js without cache
-        if: steps.check-node.outputs.has_node == 'true' && steps.check-node.outputs.has_node_deps == 'false'
-        uses: actions/setup-node@v3
-        with:
-          node-version: '16'
-          
-      # Set up Python for Pylint (only if Python files exist)
-      - name: Check for Python project
-        id: check-python
+      - name: Create default configs
         run: |
-          if [ -n "$(find . -name "*.py" -type f -not -path "*/\.*" | head -1)" ]; then
-            echo "has_python=true" >> $GITHUB_OUTPUT
-            # Check if any Python dependency files exist
-            if [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "Pipfile" ] || [ -f "Pipfile.lock" ]; then
-              echo "has_python_deps=true" >> $GITHUB_OUTPUT
-            else
-              echo "has_python_deps=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "has_python=false" >> $GITHUB_OUTPUT
-            echo "has_python_deps=false" >> $GITHUB_OUTPUT
-          fi
+          echo "root = true
 
-      # Install Pylint if Python is detected
-      - name: Install Pylint
-        if: steps.check-python.outputs.has_python == 'true'
-        run: pip install pylint
-      
-      # Set up Python with dependency caching only if dependency files exist
-      - name: Set up Python with cache
-        if: steps.check-python.outputs.has_python == 'true' && steps.check-python.outputs.has_python_deps == 'true'
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-          cache-dependency-path: |
-            **/requirements.txt
-            **/pyproject.toml
-            **/setup.py
-            **/Pipfile
-            **/Pipfile.lock
+          [*.{cs,vb}]
+          dotnet_analyzer_diagnostic.severity = warning" > .editorconfig
 
-      # Set up Python without dependency caching if no dependency files exist
-      - name: Set up Python without cache
-        if: steps.check-python.outputs.has_python == 'true' && steps.check-python.outputs.has_python_deps == 'false'
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-      
-      # Set up Go for Golint (only if Go files exist)
-      - name: Check for Go project
-        id: check-go
-        run: |
-          if [ -n "$(find . -name "*.go" -type f -not -path "*/\.*" | head -1)" ]; then
-            echo "has_go=true" >> $GITHUB_OUTPUT
-            # Check if go.mod exists
-            if [ -f "go.mod" ] || [ -f "go.sum" ]; then
-              echo "has_go_deps=true" >> $GITHUB_OUTPUT
-            else
-              echo "has_go_deps=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "has_go=false" >> $GITHUB_OUTPUT
-            echo "has_go_deps=false" >> $GITHUB_OUTPUT
-          fi
+          echo '{
+            "$schema": "https://raw.githubusercontent.com/DotNetAnalyzers/StyleCopAnalyzers/master/StyleCop.Analyzers/StyleCop.Analyzers/Settings/stylecop.schema.json",
+            "settings": {
+              "documentationRules": {
+                "companyName": "YourCompany"
+              }
+            }
+          }' > stylecop.json
 
-      # Install Golint if Go is detected
-      - name: Install Golint
-        if: steps.check-go.outputs.has_go == 'true'
-        run: go install golang.org/x/lint/golint@latest
-      
-      # Set up Go with dependency caching only if go.mod exists
-      - name: Set up Go with cache
-        if: steps.check-go.outputs.has_go == 'true' && steps.check-go.outputs.has_go_deps == 'true'
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.19'
-          cache: true
-          cache-dependency-path: |
-            **/go.mod
-            **/go.sum
-
-      # Set up Go without dependency caching if no go.mod exists
-      - name: Set up Go without cache
-        if: steps.check-go.outputs.has_go == 'true' && steps.check-go.outputs.has_go_deps == 'false'
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.19'
-      
-      # Set up Java for Checkstyle (only if Java files exist)
-      - name: Check for Java project
-        id: check-java
-        run: |
-          if [ -n "$(find . -name "*.java" -type f -not -path "*/\.*" | head -1)" ]; then
-            echo "has_java=true" >> $GITHUB_OUTPUT
-            # Check if any Java dependency files exist
-            if [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-              echo "has_java_deps=true" >> $GITHUB_OUTPUT
-            else
-              echo "has_java_deps=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "has_java=false" >> $GITHUB_OUTPUT
-            echo "has_java_deps=false" >> $GITHUB_OUTPUT
-          fi
-
-      # Download Checkstyle if Java is detected
-      - name: Download Checkstyle
-        if: steps.check-java.outputs.has_java == 'true'
-        run: |
-          curl -L -o checkstyle.jar https://github.com/checkstyle/checkstyle/releases/download/checkstyle-10.3.3/checkstyle-10.3.3-all.jar
-      
-      # Set up Java with dependency caching only if dependency files exist
-      - name: Set up Java with cache
-        if: steps.check-java.outputs.has_java == 'true' && steps.check-java.outputs.has_java_deps == 'true'
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'maven'
-          cache-dependency-path: |
-            **/pom.xml
-            **/build.gradle
-            **/build.gradle.kts
-
-      # Set up Java without dependency caching if no dependency files exist
-      - name: Set up Java without cache
-        if: steps.check-java.outputs.has_java == 'true' && steps.check-java.outputs.has_java_deps == 'false'
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-      
-      # Set up Ruby for RuboCop (only if Ruby files exist)
-      - name: Check for Ruby project
-        id: check-ruby
-        run: |
-          if [ -n "$(find . -name "*.rb" -type f -not -path "*/\.*" | head -1)" ]; then
-            echo "has_ruby=true" >> $GITHUB_OUTPUT
-            # Check if any Ruby dependency files exist
-            if [ -f "Gemfile" ] || [ -f "Gemfile.lock" ]; then
-              echo "has_ruby_deps=true" >> $GITHUB_OUTPUT
-            else
-              echo "has_ruby_deps=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "has_ruby=false" >> $GITHUB_OUTPUT
-            echo "has_ruby_deps=false" >> $GITHUB_OUTPUT
-          fi
-
-      # Install RuboCop if Ruby is detected
-      - name: Install RuboCop
-        if: steps.check-ruby.outputs.has_ruby == 'true'
-        run: sudo gem install rubocop
-      
-      # Set up Ruby with bundler caching only if Gemfile exists
-      - name: Set up Ruby with cache
-        if: steps.check-ruby.outputs.has_ruby == 'true' && steps.check-ruby.outputs.has_ruby_deps == 'true'
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.1'
-          bundler-cache: true
-
-      # Set up Ruby without bundler caching if no Gemfile exists
-      - name: Set up Ruby without cache
-        if: steps.check-ruby.outputs.has_ruby == 'true' && steps.check-ruby.outputs.has_ruby_deps == 'false'
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.1'
-          bundler-cache: false
-      
-      # Set up Rust for Clippy (only if Rust files exist)
-      - name: Check for Rust project
-        id: check-rust
-        run: |
-          if [ -n "$(find . -name "*.rs" -type f -not -path "*/\.*" | head -1)" ]; then
-            echo "has_rust=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_rust=false" >> $GITHUB_OUTPUT
-          fi
-      
-      # Set up Rust and Clippy if Rust files exist
-      - name: Set up Rust
-        if: steps.check-rust.outputs.has_rust == 'true'
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          components: clippy
-          override: true
-      
-      # Cache quality tools with fallback paths
-      - name: Cache quality tools
+      - name: Cache .NET tools
         uses: actions/cache@v3
         with:
           path: |
-            ~/.npm
-            ~/.cache/pip
-            ~/.cargo
-            ~/go/bin
-            ~/checkstyle.jar
-          key: ${{ runner.os }}-quality-tools-${{ hashFiles('**/package.json', '**/requirements.txt', '**/Cargo.toml', '**/go.mod', '**/Gemfile') || github.run_id }}
+            ~/.dotnet/tools
+            ~/.nuget/packages
+          key: ${{ runner.os }}-dotnet-${{ hashFiles('**/*.csproj', '**/*.sln') }}
           restore-keys: |
-            ${{ runner.os }}-quality-tools-
-      
-      # Install quality tools explicitly
-      - name: Install quality tools
-        run: |
-          # Install ESLint if Node.js is detected
-          if [ "${{ steps.check-node.outputs.has_node }}" = "true" ]; then
-            echo "Installing ESLint..."
-            npm install -g eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin typescript
-          fi
-          
-          # Install Pylint if Python is detected
-          if [ "${{ steps.check-python.outputs.has_python }}" = "true" ]; then
-            echo "Installing Pylint..."
-            pip install pylint
-          fi
-          
-          # Install Golint if Go is detected
-          if [ "${{ steps.check-go.outputs.has_go }}" = "true" ]; then
-            echo "Installing Golint..."
-            go install golang.org/x/lint/golint@latest
-          fi
-          
-          # Download Checkstyle if Java is detected
-          if [ "${{ steps.check-java.outputs.has_java }}" = "true" ]; then
-            echo "Downloading Checkstyle..."
-            curl -L -o ~/checkstyle.jar https://github.com/checkstyle/checkstyle/releases/download/checkstyle-10.3.3/checkstyle-10.3.3-all.jar
-          fi
-          
-          # Install RuboCop if Ruby is detected
-          if [ "${{ steps.check-ruby.outputs.has_ruby }}" = "true" ]; then
-            echo "Installing RuboCop..."
-            sudo gem install rubocop
-          fi
-      
-      # Check file structure and permissions
-      - name: Check file structure
-        run: |
-          echo "Checking repository structure..."
-          find . -type f -name "*.ts" | sort
-          echo "Checking permissions..."
-          ls -la src/ || echo "src directory not found"
-          echo "Creating minimal ESLint config if not exists..."
-          if [ ! -f ".eslintrc.json" ]; then
-            echo '{"rules":{"no-unused-vars":"warn","no-console":"warn"}}' > .eslintrc.json
-          fi
-      
+            ${{ runner.os }}-dotnet-
+
       - name: PR Review Bot
         uses: boredom1234/pr-review-bot-together@master
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
-          # Available models: Price per 1M tokens
-          # meta-llama/Llama-3.3-70B-Instruct-Turbo                        $0.88
-          # meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo-128K               $0.18
-          # meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo                  $3.50
-          # deepseek-ai/DeepSeek-V3                                        $1.25
-          # deepseek-ai/DeepSeek-R1                                        $3.00 / $7.00
-          TOGETHER_API_MODEL: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
-          exclude: '*.md,*.txt'  # Only exclude markdown and text files
-          
-          # Quality metrics options
-          enable_quality_metrics: 'true'
-          quality_tools: 'eslint,pylint,golint'  # Remove rubocop due to permission issues
-          quality_config_paths: '{"eslint":".eslintrc.json","pylint":"pylintrc"}'  # optional: custom config paths
-          ignore_rules: '{"eslint":["no-console","no-unused-vars"],"pylint":["missing-docstring"]}'  # optional: rules to ignore
-          ignore_files: '**/*.test.js,**/*.spec.js,**/vendor/**'  # Exclude test files
-          fail_on_quality_issues: 'false'  # Set to false to prevent workflow failure
-          max_critical_issues: '-1'  # Set to -1 to disable failing on critical issues
-          max_warning_issues: '-1'
-          max_suggestion_issues: '-1'
-          comment_mode: 'all'  # Comment on all issues
+          TOGETHER_API_MODEL: meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
+          enable_quality_metrics: true
+          quality_tools: eslint,pylint,golint,roslyn,stylecop,resharper
+          quality_config_paths: '{"eslint":".eslintrc.json","roslyn":".editorconfig","stylecop":"stylecop.json","resharper":"resharper.DotSettings"}'
+          resharper_solution: ${{ github.workspace }}/*.sln
+          ignore_rules: '{"eslint":["no-console","no-unused-vars"],"stylecop":["SA1633","SA1200"],"resharper":["RedundantUsingDirective"],"roslyn":["IDE0005"]}'
+          ignore_files: "**/*.Designer.cs,**/obj/**,**/bin/**,**/*.g.cs"
+          fail_on_quality_issues: false
+          max_critical_issues: -1
+          max_warning_issues: -1
+          comment_mode: all

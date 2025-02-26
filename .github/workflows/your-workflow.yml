@@ -16,6 +16,45 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Setup Node.js for ESLint
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      # Setup Python for Pylint
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # Setup Go for Golint
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.x'
+
+      # Setup Java for Checkstyle
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # Setup Ruby for RuboCop
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+
+      # Setup Rust for Clippy
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+
+      # Setup .NET
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
         with:
@@ -23,8 +62,22 @@ jobs:
             6.0.x
             7.0.x
 
-      - name: Install .NET quality tools
+      # Install quality tools
+      - name: Install quality tools
         run: |
+          # Node.js tools
+          npm install -g eslint
+
+          # Python tools
+          pip install pylint
+
+          # Go tools
+          go install golang.org/x/lint/golint@latest
+
+          # Ruby tools
+          gem install rubocop
+
+          # .NET tools
           # Install global tools first
           dotnet tool install -g JetBrains.ReSharper.GlobalTools
 
@@ -43,8 +96,23 @@ jobs:
             echo "No .NET projects found. Skipping analyzer package installation."
           fi
 
+      # Create default configs
       - name: Create default configs
         run: |
+          # ESLint config
+          echo '{
+            "extends": "eslint:recommended",
+            "env": {
+              "node": true,
+              "es6": true
+            }
+          }' > .eslintrc.json
+
+          # Pylint config
+          echo '[MESSAGES CONTROL]
+          disable=C0111,C0103' > .pylintrc
+
+          # .NET configs
           echo "root = true
 
           [*.{cs,vb}]
@@ -59,16 +127,23 @@ jobs:
             }
           }' > stylecop.json
 
-      - name: Cache .NET tools
+      # Cache dependencies
+      - name: Cache dependencies
         uses: actions/cache@v3
         with:
           path: |
+            ~/.npm
+            ~/.cache/pip
+            ~/go/pkg/mod
+            ~/.cargo/registry
+            ~/.cargo/git
             ~/.dotnet/tools
             ~/.nuget/packages
-          key: ${{ runner.os }}-dotnet-${{ hashFiles('**/*.csproj', '**/*.sln') }}
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/package-lock.json', '**/requirements.txt', '**/go.sum', '**/Cargo.lock', '**/*.csproj', '**/*.sln') }}
           restore-keys: |
-            ${{ runner.os }}-dotnet-
+            ${{ runner.os }}-deps-
 
+      # Run PR Review Bot
       - name: PR Review Bot
         uses: boredom1234/pr-review-bot-together@master
         with:
@@ -76,8 +151,8 @@ jobs:
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           TOGETHER_API_MODEL: meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
           enable_quality_metrics: true
-          quality_tools: eslint,pylint,golint,roslyn,stylecop,resharper
-          quality_config_paths: '{"eslint":".eslintrc.json","roslyn":".editorconfig","stylecop":"stylecop.json","resharper":"resharper.DotSettings"}'
+          quality_tools: eslint,pylint,golint,checkstyle,rubocop,clippy,roslyn,stylecop,resharper
+          quality_config_paths: '{"eslint":".eslintrc.json","pylint":".pylintrc","roslyn":".editorconfig","stylecop":"stylecop.json","resharper":"resharper.DotSettings"}'
           resharper_solution: ${{ github.workspace }}/*.sln
           ignore_rules: '{"eslint":["no-console","no-unused-vars"],"stylecop":["SA1633","SA1200"],"resharper":["RedundantUsingDirective"],"roslyn":["IDE0005"]}'
           ignore_files: "**/*.Designer.cs,**/obj/**,**/bin/**,**/*.g.cs"

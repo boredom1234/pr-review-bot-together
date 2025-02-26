@@ -3,29 +3,90 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   review:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Fetch all history for quality tools
-      
-      - name: Run PR Review
-        uses: ./
+          fetch-depth: 0 # Fetch all history for quality tools
+
+      # Set up Node.js for ESLint
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "16"
+          cache: "npm"
+
+      # Set up Python for Pylint
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      # Set up Go for Golint
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.19"
+          cache: true
+
+      # Set up Java for Checkstyle
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          cache: "maven"
+
+      # Set up Ruby for RuboCop
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.1"
+          bundler-cache: true
+
+      # Cache quality tools
+      - name: Cache quality tools
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/pip
+            ~/.cargo
+            ~/go/bin
+            ~/checkstyle.jar
+          key: ${{ runner.os }}-quality-tools-${{ hashFiles('**/package-lock.json', '**/requirements.txt', '**/Cargo.lock', '**/go.sum', '**/Gemfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-quality-tools-
+
+      - name: PR Review Bot
+        uses: boredom1234/pr-review-bot-together@master
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           # Available models: Price per 1M tokens
-            # meta-llama/Llama-3.3-70B-Instruct-Turbo                        $0.88
-            # meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo-128K               $0.18
-            # meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo                  $3.50
-            # deepseek-ai/DeepSeek-V3                                        $1.25
-            # deepseek-ai/DeepSeek-R1                                        $3.00 / $7.00
-          TOGETHER_API_MODEL: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'  # or your preferred model
-          exclude: '*.md,*.txt'  # optional: files to exclude
-          
+          # meta-llama/Llama-3.3-70B-Instruct-Turbo                        $0.88
+          # meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo-128K               $0.18
+          # meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo                  $3.50
+          # deepseek-ai/DeepSeek-V3                                        $1.25
+          # deepseek-ai/DeepSeek-R1                                        $3.00 / $7.00
+          TOGETHER_API_MODEL: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" # or your preferred model
+          exclude: "*.md,*.txt" # optional: files to exclude
+
           # Quality metrics options
-          enable_quality_metrics: 'true'
-          quality_tools: 'auto'  # or specify: 'eslint,pylint'
-          fail_on_quality_issues: 'true'
+          enable_quality_metrics: "true"
+          quality_tools: "auto" # or specify: 'eslint,pylint,golint,checkstyle,rubocop,clippy'
+          quality_config_paths: '{"eslint":".eslintrc.json","pylint":"pylintrc"}' # optional: custom config paths
+          ignore_rules: '{"eslint":["no-console","no-unused-vars"],"pylint":["missing-docstring"]}' # optional: rules to ignore
+          ignore_files: "**/*.test.js,**/*.spec.js,**/vendor/**" # optional: additional files to ignore
+          fail_on_quality_issues: "true"
+          max_critical_issues: "0"
+          max_warning_issues: "10"
+          max_suggestion_issues: "-1"
+          comment_mode: "unresolved" # options: 'all', 'new', 'unresolved'

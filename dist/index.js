@@ -572,25 +572,26 @@ function getPreviousReviews(owner, repo, pull_number) {
                 per_page: 100,
             });
             const reviews = comments
-                .map(comment => {
+                .map((comment) => {
                 var _a;
                 const match = comment.body.match(/<!--review-id:(.*?),commit:(.*?)-->/);
                 if (!match)
                     return null;
                 const [, id, commitSha] = match;
-                const severity = (_a = comment.body.match(/\[(CRITICAL|WARNING|SUGGESTION)\]/i)) === null || _a === void 0 ? void 0 : _a[1].toLowerCase();
+                const severity = (_a = comment.body
+                    .match(/\[(CRITICAL|WARNING|SUGGESTION)\]/i)) === null || _a === void 0 ? void 0 : _a[1].toLowerCase();
                 const review = {
                     id,
                     commitSha,
                     timestamp: comment.created_at,
                     comment: {
-                        body: comment.body.replace(/<!--.*?-->/g, '').trim(),
+                        body: comment.body.replace(/<!--.*?-->/g, "").trim(),
                         path: comment.path,
                         line: comment.line || 1,
                         severity: severity || "warning",
                         id,
-                        status: "active"
-                    }
+                        status: "active",
+                    },
                 };
                 return review;
             })
@@ -608,12 +609,13 @@ function compareWithPreviousReviews(newComments, historicalReviews, currentCommi
         const processedComments = [];
         for (const newComment of newComments) {
             // Generate a stable ID for the new comment based on its content and location
-            const commentId = Buffer.from(`${newComment.path}:${newComment.line}:${newComment.body}`).toString('base64');
+            const commentId = Buffer.from(`${newComment.path}:${newComment.line}:${newComment.body}`).toString("base64");
             newComment.id = commentId;
             // Check if this issue was previously reported
-            const previousReview = historicalReviews.find(hr => hr.comment.path === newComment.path &&
+            const previousReview = historicalReviews.find((hr) => hr.comment.path === newComment.path &&
                 Math.abs(hr.comment.line - newComment.line) <= 3 && // Allow small line number changes
-                hr.comment.body.replace(/\[.*?\]/g, '').trim() === newComment.body.replace(/\[.*?\]/g, '').trim());
+                hr.comment.body.replace(/\[.*?\]/g, "").trim() ===
+                    newComment.body.replace(/\[.*?\]/g, "").trim());
             if (previousReview) {
                 // If the issue still exists, mark it as persistent
                 newComment.body = `${newComment.body}\n\n⚠️ This issue was previously reported and still needs to be addressed.`;
@@ -623,7 +625,9 @@ function compareWithPreviousReviews(newComments, historicalReviews, currentCommi
             processedComments.push(newComment);
         }
         // Check for resolved issues
-        const resolvedComments = historicalReviews.filter(hr => !processedComments.some(pc => pc.id === hr.comment.id)).map(hr => (Object.assign(Object.assign({}, hr.comment), { body: `✅ RESOLVED: ${hr.comment.body}`, status: "resolved" })));
+        const resolvedComments = historicalReviews
+            .filter((hr) => !processedComments.some((pc) => pc.id === hr.comment.id))
+            .map((hr) => (Object.assign(Object.assign({}, hr.comment), { body: `✅ RESOLVED: ${hr.comment.body}`, status: "resolved" })));
         return [...processedComments, ...resolvedComments];
     });
 }
@@ -684,39 +688,69 @@ function main() {
         });
         // Get list of changed files for quality metrics
         const changedFiles = filteredDiff
-            .filter(file => file.to && file.to !== "/dev/null")
-            .map(file => file.to);
+            .filter((file) => file.to && file.to !== "/dev/null")
+            .map((file) => file.to);
         // Run quality metrics on changed files
         const qualityResults = yield (0, qualityMetrics_1.runQualityMetrics)(process.cwd(), changedFiles);
         // Convert quality issues to review comments
-        const qualityComments = qualityResults.issues.map(issue => ({
+        const qualityComments = qualityResults.issues.map((issue) => ({
             body: `${issue.message} (${issue.rule})`,
             path: issue.path,
             line: issue.line,
             severity: issue.severity,
-            source: 'quality-tool'
+            source: "quality-tool",
         }));
         let comments = yield analyzeCode(filteredDiff, prDetails, diffResult.fileContexts);
         // Add quality comments to AI comments
         comments = [...comments, ...qualityComments];
         // Compare with previous reviews and update comments
         comments = yield compareWithPreviousReviews(comments, historicalReviews, currentCommitSha);
+        // Filter comments based on comment_mode
+        const commentMode = core.getInput("comment_mode") || "all";
+        let filteredComments = [...comments];
+        if (commentMode === "new") {
+            // Only include comments that don't have a matching historical review
+            filteredComments = comments.filter((comment) => !historicalReviews.some((hr) => hr.comment.id === comment.id));
+        }
+        else if (commentMode === "unresolved") {
+            // Include new comments and unresolved historical comments
+            filteredComments = comments.filter((comment) => comment.status !== "resolved");
+        }
+        // 'all' mode includes all comments, so no filtering needed
         // Format quality metrics as markdown
         const qualityMetricsMarkdown = (0, qualityMetrics_1.formatQualityMetricsMarkdown)(qualityResults.metrics);
-        yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments, qualityMetricsMarkdown);
+        yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, filteredComments, qualityMetricsMarkdown);
         // Set action status based on review outcome
         const criticalIssues = comments.filter((c) => c.severity === "critical" && c.status !== "resolved").length;
         const warnings = comments.filter((c) => c.severity === "warning" && c.status !== "resolved").length;
-        const failOnQualityIssues = core.getInput('fail_on_quality_issues') === 'true';
+        const suggestions = comments.filter((c) => c.severity === "suggestion" && c.status !== "resolved").length;
+        const failOnQualityIssues = core.getInput("fail_on_quality_issues") === "true";
         const qualityIssuesCount = qualityResults.issues.length;
-        if (criticalIssues > 0) {
-            core.setFailed(`❌ Found ${criticalIssues} critical issue${criticalIssues > 1 ? "s" : ""} that must be fixed.`);
+        // Get configurable thresholds
+        const maxCriticalIssues = parseInt(core.getInput("max_critical_issues") || "0");
+        const maxWarningIssues = parseInt(core.getInput("max_warning_issues") || "-1");
+        const maxSuggestionIssues = parseInt(core.getInput("max_suggestion_issues") || "-1");
+        // Check if we should fail based on thresholds
+        let shouldFail = false;
+        let failureMessage = "";
+        if (maxCriticalIssues >= 0 && criticalIssues > maxCriticalIssues) {
+            shouldFail = true;
+            failureMessage = `❌ Found ${criticalIssues} critical issue${criticalIssues > 1 ? "s" : ""} (threshold: ${maxCriticalIssues}).`;
         }
-        else if (warnings > 0) {
-            core.setFailed(`⚠️ Found ${warnings} warning${warnings > 1 ? "s" : ""} that should be addressed.`);
+        else if (maxWarningIssues >= 0 && warnings > maxWarningIssues) {
+            shouldFail = true;
+            failureMessage = `⚠️ Found ${warnings} warning${warnings > 1 ? "s" : ""} (threshold: ${maxWarningIssues}).`;
+        }
+        else if (maxSuggestionIssues >= 0 && suggestions > maxSuggestionIssues) {
+            shouldFail = true;
+            failureMessage = `💡 Found ${suggestions} suggestion${suggestions > 1 ? "s" : ""} (threshold: ${maxSuggestionIssues}).`;
         }
         else if (failOnQualityIssues && qualityIssuesCount > 0) {
-            core.setFailed(`⚠️ Found ${qualityIssuesCount} quality issue${qualityIssuesCount > 1 ? "s" : ""} that should be addressed.`);
+            shouldFail = true;
+            failureMessage = `⚠️ Found ${qualityIssuesCount} quality issue${qualityIssuesCount > 1 ? "s" : ""} that should be addressed.`;
+        }
+        if (shouldFail) {
+            core.setFailed(failureMessage);
         }
         else {
             core.info("✅ Code review passed successfully.");
@@ -768,6 +802,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.formatQualityMetricsMarkdown = exports.runQualityMetrics = void 0;
 const child_process_1 = __nccwpck_require__(2081);
@@ -775,6 +812,7 @@ const util = __importStar(__nccwpck_require__(3837));
 const fs = __importStar(__nccwpck_require__(7147));
 const path = __importStar(__nccwpck_require__(1017));
 const core = __importStar(__nccwpck_require__(2186));
+const minimatch_1 = __importDefault(__nccwpck_require__(2002));
 const execPromise = util.promisify(child_process_1.exec);
 // Detect which tools to use based on repo content
 function detectTools(repoPath) {
@@ -782,125 +820,422 @@ function detectTools(repoPath) {
         const tools = [];
         // Check for JavaScript/TypeScript files
         try {
-            const hasJsFiles = fs.existsSync(path.join(repoPath, 'package.json'));
+            const hasJsFiles = fs.existsSync(path.join(repoPath, "package.json"));
             if (hasJsFiles) {
                 // Check if ESLint is configured
-                if (fs.existsSync(path.join(repoPath, '.eslintrc.js')) ||
-                    fs.existsSync(path.join(repoPath, '.eslintrc.json')) ||
-                    fs.existsSync(path.join(repoPath, '.eslintrc.yml'))) {
-                    tools.push('eslint');
+                if (fs.existsSync(path.join(repoPath, ".eslintrc.js")) ||
+                    fs.existsSync(path.join(repoPath, ".eslintrc.json")) ||
+                    fs.existsSync(path.join(repoPath, ".eslintrc.yml"))) {
+                    tools.push("eslint");
                 }
             }
         }
         catch (error) {
-            console.error('Error detecting JS tools:', error);
+            console.error("Error detecting JS tools:", error);
         }
         // Check for Python files
         try {
-            const hasPyFiles = fs.readdirSync(repoPath).some(file => file.endsWith('.py'));
+            const hasPyFiles = fs
+                .readdirSync(repoPath)
+                .some((file) => file.endsWith(".py"));
             if (hasPyFiles) {
-                tools.push('pylint');
+                tools.push("pylint");
             }
         }
         catch (error) {
-            console.error('Error detecting Python tools:', error);
+            console.error("Error detecting Python tools:", error);
         }
-        // Add more language detection as needed <TODO>
+        // Check for Go files
+        try {
+            const hasGoFiles = fs
+                .readdirSync(repoPath)
+                .some((file) => file.endsWith(".go"));
+            if (hasGoFiles) {
+                tools.push("golint");
+            }
+        }
+        catch (error) {
+            console.error("Error detecting Go tools:", error);
+        }
+        // Check for Java files
+        try {
+            const hasJavaFiles = fs
+                .readdirSync(repoPath)
+                .some((file) => file.endsWith(".java"));
+            if (hasJavaFiles) {
+                tools.push("checkstyle");
+            }
+        }
+        catch (error) {
+            console.error("Error detecting Java tools:", error);
+        }
+        // Check for Ruby files
+        try {
+            const hasRubyFiles = fs
+                .readdirSync(repoPath)
+                .some((file) => file.endsWith(".rb"));
+            if (hasRubyFiles) {
+                tools.push("rubocop");
+            }
+        }
+        catch (error) {
+            console.error("Error detecting Ruby tools:", error);
+        }
+        // Check for Rust files
+        try {
+            const hasRustFiles = fs
+                .readdirSync(repoPath)
+                .some((file) => file.endsWith(".rs"));
+            if (hasRustFiles) {
+                tools.push("clippy");
+            }
+        }
+        catch (error) {
+            console.error("Error detecting Rust tools:", error);
+        }
         return tools;
     });
 }
 // Run ESLint analysis
-function runEslint(repoPath, filePaths) {
+function runEslint(repoPath, filePaths, configPath) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             // Install ESLint if not already installed
-            yield execPromise('npm install eslint --no-save', { cwd: repoPath });
+            yield execPromise("npm install eslint --no-save", { cwd: repoPath });
             // Filter for JS/TS files
-            const jsFiles = filePaths.filter(file => file.endsWith('.js') ||
-                file.endsWith('.jsx') ||
-                file.endsWith('.ts') ||
-                file.endsWith('.tsx'));
+            const jsFiles = filePaths.filter((file) => file.endsWith(".js") ||
+                file.endsWith(".jsx") ||
+                file.endsWith(".ts") ||
+                file.endsWith(".tsx"));
             if (jsFiles.length === 0) {
                 return { issues: [] };
             }
             // Run ESLint with JSON reporter
-            const { stdout } = yield execPromise(`npx eslint ${jsFiles.join(' ')} --format json`, { cwd: repoPath });
+            let eslintCommand = `npx eslint ${jsFiles.join(" ")} --format json`;
+            // Add custom config if provided
+            if (configPath) {
+                eslintCommand += ` -c ${configPath}`;
+            }
+            const { stdout } = yield execPromise(eslintCommand, { cwd: repoPath });
             const eslintResults = JSON.parse(stdout);
             // Transform ESLint results to our format
             const issues = [];
             eslintResults.forEach((result) => {
                 result.messages.forEach((msg) => {
                     issues.push({
-                        path: result.filePath.replace(`${repoPath}/`, ''),
+                        path: result.filePath.replace(`${repoPath}/`, ""),
                         line: msg.line,
                         message: msg.message,
-                        rule: msg.ruleId || 'unknown',
-                        severity: msg.severity === 2 ? 'critical' : (msg.severity === 1 ? 'warning' : 'suggestion')
+                        rule: msg.ruleId || "unknown",
+                        severity: msg.severity === 2
+                            ? "critical"
+                            : msg.severity === 1
+                                ? "warning"
+                                : "suggestion",
                     });
                 });
             });
             // Calculate metrics
             const metrics = {
                 totalIssues: issues.length,
-                criticalIssues: issues.filter(i => i.severity === 'critical').length,
-                warningIssues: issues.filter(i => i.severity === 'warning').length,
-                filesWithIssues: new Set(issues.map(i => i.path)).size
+                criticalIssues: issues.filter((i) => i.severity === "critical").length,
+                warningIssues: issues.filter((i) => i.severity === "warning").length,
+                filesWithIssues: new Set(issues.map((i) => i.path)).size,
             };
             return { issues, metrics };
         }
         catch (error) {
-            console.error('Error running ESLint:', error);
+            console.error("Error running ESLint:", error);
             return { issues: [] };
         }
     });
 }
 // Run Pylint analysis
-function runPylint(repoPath, filePaths) {
+function runPylint(repoPath, filePaths, configPath) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             // Install Pylint if not already installed
-            yield execPromise('pip install pylint', { cwd: repoPath });
+            yield execPromise("pip install pylint", { cwd: repoPath });
             // Filter for Python files
-            const pyFiles = filePaths.filter(file => file.endsWith('.py'));
+            const pyFiles = filePaths.filter((file) => file.endsWith(".py"));
             if (pyFiles.length === 0) {
                 return { issues: [] };
             }
             // Run Pylint with JSON reporter
-            const { stdout } = yield execPromise(`pylint --output-format=json ${pyFiles.join(' ')}`, { cwd: repoPath });
+            let pylintCommand = `pylint --output-format=json`;
+            // Add custom config if provided
+            if (configPath) {
+                pylintCommand += ` --rcfile=${configPath}`;
+            }
+            pylintCommand += ` ${pyFiles.join(" ")}`;
+            const { stdout } = yield execPromise(pylintCommand, { cwd: repoPath });
             const pylintResults = JSON.parse(stdout);
             // Transform Pylint results to our format
             const issues = [];
             pylintResults.forEach((result) => {
                 // Map Pylint severity to our severity levels
                 let severity;
-                if (result.type === 'error') {
-                    severity = 'critical';
+                if (result.type === "error") {
+                    severity = "critical";
                 }
-                else if (result.type === 'warning') {
-                    severity = 'warning';
+                else if (result.type === "warning") {
+                    severity = "warning";
                 }
                 else {
-                    severity = 'suggestion';
+                    severity = "suggestion";
                 }
                 issues.push({
                     path: result.path,
                     line: result.line,
                     message: result.message,
                     rule: result.symbol,
-                    severity
+                    severity,
                 });
             });
             // Calculate metrics
             const metrics = {
                 totalIssues: issues.length,
-                criticalIssues: issues.filter(i => i.severity === 'critical').length,
-                warningIssues: issues.filter(i => i.severity === 'warning').length,
-                filesWithIssues: new Set(issues.map(i => i.path)).size
+                criticalIssues: issues.filter((i) => i.severity === "critical").length,
+                warningIssues: issues.filter((i) => i.severity === "warning").length,
+                filesWithIssues: new Set(issues.map((i) => i.path)).size,
             };
             return { issues, metrics };
         }
         catch (error) {
-            console.error('Error running Pylint:', error);
+            console.error("Error running Pylint:", error);
+            return { issues: [] };
+        }
+    });
+}
+// Run Golint analysis
+function runGolint(repoPath, filePaths, configPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Install golint if not already installed
+            yield execPromise("go install golang.org/x/lint/golint@latest", {
+                cwd: repoPath,
+            });
+            // Filter for Go files
+            const goFiles = filePaths.filter((file) => file.endsWith(".go"));
+            if (goFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Run golint
+            const { stdout } = yield execPromise(`golint -json ${goFiles.join(" ")}`, {
+                cwd: repoPath,
+            });
+            // Parse the output (assuming JSON format)
+            const golintResults = stdout.trim()
+                ? JSON.parse(`[${stdout.trim().split("\n").join(",")}]`)
+                : [];
+            // Transform golint results to our format
+            const issues = [];
+            golintResults.forEach((result) => {
+                issues.push({
+                    path: result.file,
+                    line: result.line,
+                    message: result.message,
+                    rule: "golint",
+                    severity: "warning", // Golint doesn't have severity levels, default to warning
+                });
+            });
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter((i) => i.severity === "critical").length,
+                warningIssues: issues.filter((i) => i.severity === "warning").length,
+                filesWithIssues: new Set(issues.map((i) => i.path)).size,
+            };
+            return { issues, metrics };
+        }
+        catch (error) {
+            console.error("Error running Golint:", error);
+            return { issues: [] };
+        }
+    });
+}
+// Run Checkstyle analysis for Java
+function runCheckstyle(repoPath, filePaths, configPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Filter for Java files
+            const javaFiles = filePaths.filter((file) => file.endsWith(".java"));
+            if (javaFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Download checkstyle jar if not exists
+            const checkstyleJar = path.join(repoPath, "checkstyle.jar");
+            if (!fs.existsSync(checkstyleJar)) {
+                yield execPromise("curl -L -o checkstyle.jar https://github.com/checkstyle/checkstyle/releases/download/checkstyle-10.3.3/checkstyle-10.3.3-all.jar", { cwd: repoPath });
+            }
+            // Run checkstyle with XML output
+            const { stdout } = yield execPromise(`java -jar checkstyle.jar -c /google_checks.xml -f xml ${javaFiles.join(" ")}`, { cwd: repoPath });
+            // Parse XML output
+            const issues = [];
+            // Simple XML parsing (in a real implementation, use a proper XML parser)
+            const fileMatches = stdout.matchAll(/<file name="([^"]+)">/g);
+            for (const fileMatch of fileMatches) {
+                const filePath = fileMatch[1].replace(`${repoPath}/`, "");
+                const fileSection = stdout
+                    .split(`<file name="${fileMatch[1]}">`)[1]
+                    .split("</file>")[0];
+                const errorMatches = fileSection.matchAll(/<error line="(\d+)" [^>]*severity="([^"]+)" [^>]*message="([^"]+)"([^>]*)\/>/g);
+                for (const errorMatch of errorMatches) {
+                    const line = parseInt(errorMatch[1]);
+                    const checkstyleSeverity = errorMatch[2];
+                    const message = errorMatch[3];
+                    // Map checkstyle severity to our severity levels
+                    let severity;
+                    if (checkstyleSeverity === "error") {
+                        severity = "critical";
+                    }
+                    else if (checkstyleSeverity === "warning") {
+                        severity = "warning";
+                    }
+                    else {
+                        severity = "suggestion";
+                    }
+                    issues.push({
+                        path: filePath,
+                        line,
+                        message,
+                        rule: "checkstyle",
+                        severity,
+                    });
+                }
+            }
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter((i) => i.severity === "critical").length,
+                warningIssues: issues.filter((i) => i.severity === "warning").length,
+                filesWithIssues: new Set(issues.map((i) => i.path)).size,
+            };
+            return { issues, metrics };
+        }
+        catch (error) {
+            console.error("Error running Checkstyle:", error);
+            return { issues: [] };
+        }
+    });
+}
+// Run RuboCop analysis for Ruby
+function runRubocop(repoPath, filePaths, configPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Install RuboCop if not already installed
+            yield execPromise("gem install rubocop", { cwd: repoPath });
+            // Filter for Ruby files
+            const rubyFiles = filePaths.filter((file) => file.endsWith(".rb"));
+            if (rubyFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Run RuboCop with JSON formatter
+            const { stdout } = yield execPromise(`rubocop --format json ${rubyFiles.join(" ")}`, { cwd: repoPath });
+            const rubocopResults = JSON.parse(stdout);
+            // Transform RuboCop results to our format
+            const issues = [];
+            rubocopResults.files.forEach((file) => {
+                const filePath = file.path.replace(`${repoPath}/`, "");
+                file.offenses.forEach((offense) => {
+                    // Map RuboCop severity to our severity levels
+                    let severity;
+                    if (offense.severity === "error" || offense.severity === "fatal") {
+                        severity = "critical";
+                    }
+                    else if (offense.severity === "warning") {
+                        severity = "warning";
+                    }
+                    else {
+                        severity = "suggestion";
+                    }
+                    issues.push({
+                        path: filePath,
+                        line: offense.location.line,
+                        message: offense.message,
+                        rule: offense.cop_name,
+                        severity,
+                    });
+                });
+            });
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter((i) => i.severity === "critical").length,
+                warningIssues: issues.filter((i) => i.severity === "warning").length,
+                filesWithIssues: new Set(issues.map((i) => i.path)).size,
+            };
+            return { issues, metrics };
+        }
+        catch (error) {
+            console.error("Error running RuboCop:", error);
+            return { issues: [] };
+        }
+    });
+}
+// Run Clippy analysis for Rust
+function runClippy(repoPath, filePaths, configPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // Filter for Rust files
+            const rustFiles = filePaths.filter((file) => file.endsWith(".rs"));
+            if (rustFiles.length === 0) {
+                return { issues: [] };
+            }
+            // Run Clippy with JSON message format
+            const { stdout } = yield execPromise(`cargo clippy --message-format=json`, {
+                cwd: repoPath,
+            });
+            // Parse the JSON lines output
+            const issues = [];
+            stdout
+                .split("\n")
+                .filter(Boolean)
+                .forEach((line) => {
+                try {
+                    const result = JSON.parse(line);
+                    if (result.reason === "compiler-message" &&
+                        result.message &&
+                        result.message.spans) {
+                        // Only process diagnostic messages with spans
+                        const primarySpan = result.message.spans.find((span) => span.is_primary);
+                        if (primarySpan) {
+                            // Map Clippy level to our severity levels
+                            let severity;
+                            if (result.message.level === "error") {
+                                severity = "critical";
+                            }
+                            else if (result.message.level === "warning") {
+                                severity = "warning";
+                            }
+                            else {
+                                severity = "suggestion";
+                            }
+                            issues.push({
+                                path: primarySpan.file_name.replace(`${repoPath}/`, ""),
+                                line: primarySpan.line_start,
+                                message: result.message.message,
+                                rule: result.message.code ? result.message.code.code : "clippy",
+                                severity,
+                            });
+                        }
+                    }
+                }
+                catch (e) {
+                    // Skip lines that aren't valid JSON
+                }
+            });
+            // Calculate metrics
+            const metrics = {
+                totalIssues: issues.length,
+                criticalIssues: issues.filter((i) => i.severity === "critical").length,
+                warningIssues: issues.filter((i) => i.severity === "warning").length,
+                filesWithIssues: new Set(issues.map((i) => i.path)).size,
+            };
+            return { issues, metrics };
+        }
+        catch (error) {
+            console.error("Error running Clippy:", error);
             return { issues: [] };
         }
     });
@@ -908,15 +1243,56 @@ function runPylint(repoPath, filePaths) {
 // Main function to run quality metrics
 function runQualityMetrics(repoPath, changedFiles) {
     return __awaiter(this, void 0, void 0, function* () {
-        const enableMetrics = core.getInput('enable_quality_metrics') === 'true';
+        const enableMetrics = core.getInput("enable_quality_metrics") === "true";
         if (!enableMetrics) {
             return { issues: [], metrics: {} };
         }
-        let toolsToRun = core.getInput('quality_tools').split(',').map(t => t.trim());
+        let toolsToRun = core
+            .getInput("quality_tools")
+            .split(",")
+            .map((t) => t.trim());
         // Auto-detect tools if set to "auto"
-        if (toolsToRun.length === 1 && toolsToRun[0] === 'auto') {
+        if (toolsToRun.length === 1 && toolsToRun[0] === "auto") {
             toolsToRun = yield detectTools(repoPath);
-            core.info(`Auto-detected quality tools: ${toolsToRun.join(', ')}`);
+            core.info(`Auto-detected quality tools: ${toolsToRun.join(", ")}`);
+        }
+        // Parse custom config paths
+        let customConfigPaths = {};
+        try {
+            const configPathsInput = core.getInput("quality_config_paths");
+            if (configPathsInput) {
+                customConfigPaths = JSON.parse(configPathsInput);
+                core.info(`Using custom config paths: ${JSON.stringify(customConfigPaths)}`);
+            }
+        }
+        catch (error) {
+            core.warning(`Failed to parse quality_config_paths: ${error}`);
+        }
+        // Parse rules to ignore
+        let ignoreRules = {};
+        try {
+            const ignoreRulesInput = core.getInput("ignore_rules");
+            if (ignoreRulesInput) {
+                ignoreRules = JSON.parse(ignoreRulesInput);
+                core.info(`Ignoring rules: ${JSON.stringify(ignoreRules)}`);
+            }
+        }
+        catch (error) {
+            core.warning(`Failed to parse ignore_rules: ${error}`);
+        }
+        // Parse additional files to ignore
+        const ignoreFilesPatterns = [];
+        const ignoreFilesInput = core.getInput("ignore_files");
+        if (ignoreFilesInput) {
+            ignoreFilesPatterns.push(...ignoreFilesInput.split(",").map((p) => p.trim()));
+            core.info(`Additional files to ignore: ${ignoreFilesPatterns.join(", ")}`);
+        }
+        // Filter out files that match ignore patterns
+        const filteredFiles = changedFiles.filter((file) => {
+            return !ignoreFilesPatterns.some((pattern) => (0, minimatch_1.default)(file, pattern));
+        });
+        if (filteredFiles.length < changedFiles.length) {
+            core.info(`Filtered out ${changedFiles.length - filteredFiles.length} files based on ignore patterns`);
         }
         const allIssues = [];
         const allMetrics = {};
@@ -924,17 +1300,44 @@ function runQualityMetrics(repoPath, changedFiles) {
         for (const tool of toolsToRun) {
             core.info(`Running quality tool: ${tool}`);
             let result = { issues: [] };
+            const configPath = customConfigPaths[tool.toLowerCase()] || null;
+            const rulesToIgnore = ignoreRules[tool.toLowerCase()] || [];
             switch (tool.toLowerCase()) {
-                case 'eslint':
-                    result = yield runEslint(repoPath, changedFiles);
+                case "eslint":
+                    result = yield runEslint(repoPath, filteredFiles, configPath);
                     break;
-                case 'pylint':
-                    result = yield runPylint(repoPath, changedFiles);
+                case "pylint":
+                    result = yield runPylint(repoPath, filteredFiles, configPath);
+                    break;
+                case "golint":
+                    result = yield runGolint(repoPath, filteredFiles, configPath);
+                    break;
+                case "checkstyle":
+                    result = yield runCheckstyle(repoPath, filteredFiles, configPath);
+                    break;
+                case "rubocop":
+                    result = yield runRubocop(repoPath, filteredFiles, configPath);
+                    break;
+                case "clippy":
+                    result = yield runClippy(repoPath, filteredFiles, configPath);
                     break;
                 // Add more tools as needed
                 default:
                     core.warning(`Unknown quality tool: ${tool}`);
                     continue;
+            }
+            // Filter out issues with rules that should be ignored
+            if (rulesToIgnore.length > 0) {
+                const originalIssueCount = result.issues.length;
+                result.issues = result.issues.filter((issue) => !rulesToIgnore.includes(issue.rule));
+                core.info(`Filtered out ${originalIssueCount - result.issues.length} issues based on ignored rules for ${tool}`);
+                // Update metrics
+                if (result.metrics) {
+                    result.metrics.totalIssues = result.issues.length;
+                    result.metrics.criticalIssues = result.issues.filter((i) => i.severity === "critical").length;
+                    result.metrics.warningIssues = result.issues.filter((i) => i.severity === "warning").length;
+                    result.metrics.filesWithIssues = new Set(result.issues.map((i) => i.path)).size;
+                }
             }
             allIssues.push(...result.issues);
             if (result.metrics) {
@@ -947,23 +1350,23 @@ function runQualityMetrics(repoPath, changedFiles) {
 exports.runQualityMetrics = runQualityMetrics;
 // Format quality metrics as markdown
 function formatQualityMetricsMarkdown(metrics) {
-    let markdown = '## 📊 Code Quality Metrics\n\n';
+    let markdown = "## 📊 Code Quality Metrics\n\n";
     if (Object.keys(metrics).length === 0) {
-        return markdown + 'No quality metrics collected.\n';
+        return markdown + "No quality metrics collected.\n";
     }
     for (const [tool, toolMetrics] of Object.entries(metrics)) {
         markdown += `### ${tool.toUpperCase()}\n\n`;
-        markdown += '| Metric | Value |\n';
-        markdown += '| ------ | ----- |\n';
+        markdown += "| Metric | Value |\n";
+        markdown += "| ------ | ----- |\n";
         for (const [metric, value] of Object.entries(toolMetrics)) {
             // Format metric name for better readability
             const formattedMetric = metric
-                .replace(/([A-Z])/g, ' $1')
-                .replace(/^./, str => str.toUpperCase())
-                .replace(/([a-z])([A-Z])/g, '$1 $2');
+                .replace(/([A-Z])/g, " $1")
+                .replace(/^./, (str) => str.toUpperCase())
+                .replace(/([a-z])([A-Z])/g, "$1 $2");
             markdown += `| ${formattedMetric} | ${value} |\n`;
         }
-        markdown += '\n';
+        markdown += "\n";
     }
     return markdown;
 }

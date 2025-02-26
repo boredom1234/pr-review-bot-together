@@ -29,10 +29,38 @@ inputs:
     description: "Comma-separated list of quality tools to run (eslint,pylint,etc)"
     required: false
     default: "auto"
+  quality_config_paths:
+    description: 'JSON mapping of tool names to config file paths (e.g., ''{"eslint":".eslintrc.custom.json","pylint":"custom_pylintrc"}'')'
+    required: false
+    default: "{}"
+  ignore_rules:
+    description: 'JSON mapping of tool names to arrays of rules to ignore (e.g., ''{"eslint":["no-console","no-unused-vars"],"pylint":["missing-docstring"]}'')'
+    required: false
+    default: "{}"
+  ignore_files:
+    description: "Additional glob patterns to exclude from quality analysis (comma-separated)"
+    required: false
+    default: ""
   fail_on_quality_issues:
     description: "Fail the action if quality issues are found"
     required: false
     default: "false"
+  max_critical_issues:
+    description: "Maximum number of critical issues allowed before failing the action (set to -1 to disable)"
+    required: false
+    default: "0"
+  max_warning_issues:
+    description: "Maximum number of warning issues allowed before failing the action (set to -1 to disable)"
+    required: false
+    default: "-1"
+  max_suggestion_issues:
+    description: "Maximum number of suggestion issues allowed before failing the action (set to -1 to disable)"
+    required: false
+    default: "-1"
+  comment_mode:
+    description: "How to handle comments: 'all' (comment on all issues), 'new' (only new issues), or 'unresolved' (new and unresolved issues)"
+    required: false
+    default: "all"
 runs:
   using: "node16"
   main: "dist/index.js"

@@ -5,7 +5,10 @@ import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
 import Together from "together-ai";
 import path from "path";
-import { runQualityMetrics, formatQualityMetricsMarkdown } from "./qualityMetrics";
+import {
+  runQualityMetrics,
+  formatQualityMetricsMarkdown,
+} from "./qualityMetrics";
 
 // Add at the top of your file for local development
 if (process.env.NODE_ENV !== "production") {
@@ -599,10 +602,9 @@ async function createReviewComment(
 
           comments.forEach((comment) => {
             const status = comment.status === "resolved" ? "✅ RESOLVED: " : "";
-            fileSection += `- **Line ${comment.line}**: ${status}${comment.body.replace(
-              /\n/g,
-              "\n  "
-            )}\n`;
+            fileSection += `- **Line ${
+              comment.line
+            }**: ${status}${comment.body.replace(/\n/g, "\n  ")}\n`;
           });
           fileSection += "\n";
         }
@@ -671,25 +673,27 @@ async function getPreviousReviews(
     });
 
     const reviews = comments
-      .map(comment => {
+      .map((comment) => {
         const match = comment.body.match(/<!--review-id:(.*?),commit:(.*?)-->/);
         if (!match) return null;
 
         const [, id, commitSha] = match;
-        const severity = comment.body.match(/\[(CRITICAL|WARNING|SUGGESTION)\]/i)?.[1].toLowerCase() as "critical" | "warning" | "suggestion";
+        const severity = comment.body
+          .match(/\[(CRITICAL|WARNING|SUGGESTION)\]/i)?.[1]
+          .toLowerCase() as "critical" | "warning" | "suggestion";
 
         const review: HistoricalReview = {
           id,
           commitSha,
           timestamp: comment.created_at,
           comment: {
-            body: comment.body.replace(/<!--.*?-->/g, '').trim(),
+            body: comment.body.replace(/<!--.*?-->/g, "").trim(),
             path: comment.path,
             line: comment.line || 1,
             severity: severity || "warning",
             id,
-            status: "active"
-          }
+            status: "active",
+          },
         };
         return review;
       })
@@ -713,14 +717,16 @@ async function compareWithPreviousReviews(
     // Generate a stable ID for the new comment based on its content and location
     const commentId = Buffer.from(
       `${newComment.path}:${newComment.line}:${newComment.body}`
-    ).toString('base64');
+    ).toString("base64");
     newComment.id = commentId;
 
     // Check if this issue was previously reported
     const previousReview = historicalReviews.find(
-      hr => hr.comment.path === newComment.path &&
-           Math.abs(hr.comment.line - newComment.line) <= 3 && // Allow small line number changes
-           hr.comment.body.replace(/\[.*?\]/g, '').trim() === newComment.body.replace(/\[.*?\]/g, '').trim()
+      (hr) =>
+        hr.comment.path === newComment.path &&
+        Math.abs(hr.comment.line - newComment.line) <= 3 && // Allow small line number changes
+        hr.comment.body.replace(/\[.*?\]/g, "").trim() ===
+          newComment.body.replace(/\[.*?\]/g, "").trim()
     );
 
     if (previousReview) {
@@ -734,13 +740,13 @@ async function compareWithPreviousReviews(
   }
 
   // Check for resolved issues
-  const resolvedComments = historicalReviews.filter(hr => 
-    !processedComments.some(pc => pc.id === hr.comment.id)
-  ).map(hr => ({
-    ...hr.comment,
-    body: `✅ RESOLVED: ${hr.comment.body}`,
-    status: "resolved" as const
-  }));
+  const resolvedComments = historicalReviews
+    .filter((hr) => !processedComments.some((pc) => pc.id === hr.comment.id))
+    .map((hr) => ({
+      ...hr.comment,
+      body: `✅ RESOLVED: ${hr.comment.body}`,
+      status: "resolved" as const,
+    }));
 
   return [...processedComments, ...resolvedComments];
 }
@@ -826,20 +832,22 @@ async function main() {
 
   // Get list of changed files for quality metrics
   const changedFiles = filteredDiff
-    .filter(file => file.to && file.to !== "/dev/null")
-    .map(file => file.to as string);
+    .filter((file) => file.to && file.to !== "/dev/null")
+    .map((file) => file.to as string);
 
   // Run quality metrics on changed files
   const qualityResults = await runQualityMetrics(process.cwd(), changedFiles);
-  
+
   // Convert quality issues to review comments
-  const qualityComments: ReviewComment[] = qualityResults.issues.map(issue => ({
-    body: `${issue.message} (${issue.rule})`,
-    path: issue.path,
-    line: issue.line,
-    severity: issue.severity,
-    source: 'quality-tool'
-  }));
+  const qualityComments: ReviewComment[] = qualityResults.issues.map(
+    (issue) => ({
+      body: `${issue.message} (${issue.rule})`,
+      path: issue.path,
+      line: issue.line,
+      severity: issue.severity,
+      source: "quality-tool",
+    })
+  );
 
   let comments = await analyzeCode(
     filteredDiff,
@@ -857,14 +865,33 @@ async function main() {
     currentCommitSha
   );
 
+  // Filter comments based on comment_mode
+  const commentMode = core.getInput("comment_mode") || "all";
+  let filteredComments = [...comments];
+
+  if (commentMode === "new") {
+    // Only include comments that don't have a matching historical review
+    filteredComments = comments.filter(
+      (comment) => !historicalReviews.some((hr) => hr.comment.id === comment.id)
+    );
+  } else if (commentMode === "unresolved") {
+    // Include new comments and unresolved historical comments
+    filteredComments = comments.filter(
+      (comment) => comment.status !== "resolved"
+    );
+  }
+  // 'all' mode includes all comments, so no filtering needed
+
   // Format quality metrics as markdown
-  const qualityMetricsMarkdown = formatQualityMetricsMarkdown(qualityResults.metrics);
+  const qualityMetricsMarkdown = formatQualityMetricsMarkdown(
+    qualityResults.metrics
+  );
 
   await createReviewComment(
     prDetails.owner,
     prDetails.repo,
     prDetails.pull_number,
-    comments,
+    filteredComments,
     qualityMetricsMarkdown
   );
 
@@ -875,28 +902,53 @@ async function main() {
   const warnings = comments.filter(
     (c) => c.severity === "warning" && c.status !== "resolved"
   ).length;
+  const suggestions = comments.filter(
+    (c) => c.severity === "suggestion" && c.status !== "resolved"
+  ).length;
 
-  const failOnQualityIssues = core.getInput('fail_on_quality_issues') === 'true';
+  const failOnQualityIssues =
+    core.getInput("fail_on_quality_issues") === "true";
   const qualityIssuesCount = qualityResults.issues.length;
 
-  if (criticalIssues > 0) {
-    core.setFailed(
-      `❌ Found ${criticalIssues} critical issue${
-        criticalIssues > 1 ? "s" : ""
-      } that must be fixed.`
-    );
-  } else if (warnings > 0) {
-    core.setFailed(
-      `⚠️ Found ${warnings} warning${
-        warnings > 1 ? "s" : ""
-      } that should be addressed.`
-    );
+  // Get configurable thresholds
+  const maxCriticalIssues = parseInt(
+    core.getInput("max_critical_issues") || "0"
+  );
+  const maxWarningIssues = parseInt(
+    core.getInput("max_warning_issues") || "-1"
+  );
+  const maxSuggestionIssues = parseInt(
+    core.getInput("max_suggestion_issues") || "-1"
+  );
+
+  // Check if we should fail based on thresholds
+  let shouldFail = false;
+  let failureMessage = "";
+
+  if (maxCriticalIssues >= 0 && criticalIssues > maxCriticalIssues) {
+    shouldFail = true;
+    failureMessage = `❌ Found ${criticalIssues} critical issue${
+      criticalIssues > 1 ? "s" : ""
+    } (threshold: ${maxCriticalIssues}).`;
+  } else if (maxWarningIssues >= 0 && warnings > maxWarningIssues) {
+    shouldFail = true;
+    failureMessage = `⚠️ Found ${warnings} warning${
+      warnings > 1 ? "s" : ""
+    } (threshold: ${maxWarningIssues}).`;
+  } else if (maxSuggestionIssues >= 0 && suggestions > maxSuggestionIssues) {
+    shouldFail = true;
+    failureMessage = `💡 Found ${suggestions} suggestion${
+      suggestions > 1 ? "s" : ""
+    } (threshold: ${maxSuggestionIssues}).`;
   } else if (failOnQualityIssues && qualityIssuesCount > 0) {
-    core.setFailed(
-      `⚠️ Found ${qualityIssuesCount} quality issue${
-        qualityIssuesCount > 1 ? "s" : ""
-      } that should be addressed.`
-    );
+    shouldFail = true;
+    failureMessage = `⚠️ Found ${qualityIssuesCount} quality issue${
+      qualityIssuesCount > 1 ? "s" : ""
+    } that should be addressed.`;
+  }
+
+  if (shouldFail) {
+    core.setFailed(failureMessage);
   } else {
     core.info("✅ Code review passed successfully.");
   }

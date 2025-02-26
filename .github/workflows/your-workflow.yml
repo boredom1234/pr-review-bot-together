@@ -25,11 +25,23 @@ jobs:
 
       - name: Install .NET quality tools
         run: |
+          # Install global tools first
           dotnet tool install -g JetBrains.ReSharper.GlobalTools
-          dotnet add package StyleCop.Analyzers
-          dotnet add package Microsoft.CodeAnalysis.NetAnalyzers
-          dotnet add package Microsoft.CodeAnalysis.CSharp.CodeStyle
-          dotnet add package Roslynator.Analyzers
+
+          # Check if any .NET projects exist
+          if [ -n "$(find . -name '*.csproj' -o -name '*.sln')" ]; then
+            # Find the first .NET project directory
+            PROJECT_DIR=$(dirname $(find . -name '*.csproj' -o -name '*.sln' | head -n 1))
+            cd "$PROJECT_DIR"
+            
+            # Install analyzers at project level
+            dotnet add package StyleCop.Analyzers
+            dotnet add package Microsoft.CodeAnalysis.NetAnalyzers
+            dotnet add package Microsoft.CodeAnalysis.CSharp.CodeStyle
+            dotnet add package Roslynator.Analyzers
+          else
+            echo "No .NET projects found. Skipping analyzer package installation."
+          fi
 
       - name: Create default configs
         run: |

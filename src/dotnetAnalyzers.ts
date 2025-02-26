@@ -146,6 +146,29 @@ csharp_prefer_braces = true:suggestion`;
   return defaultConfig;
 }
 
+// Helper function to check if .NET project exists
+async function hasNetProject(repoPath: string): Promise<boolean> {
+  try {
+    const files = fs.readdirSync(repoPath);
+    return files.some(file => file.endsWith('.csproj') || file.endsWith('.sln'));
+  } catch (error) {
+    core.error(`Error checking for .NET project: ${error}`);
+    return false;
+  }
+}
+
+// Helper function to find project directory
+async function findProjectDirectory(repoPath: string): Promise<string | null> {
+  try {
+    const projectFile = fs.readdirSync(repoPath)
+      .find(file => file.endsWith('.csproj') || file.endsWith('.sln'));
+    return projectFile ? path.dirname(path.join(repoPath, projectFile)) : null;
+  } catch (error) {
+    core.error(`Error finding project directory: ${error}`);
+    return null;
+  }
+}
+
 // Run Roslyn analysis
 async function runRoslynAnalysis(
   repoPath: string,
@@ -155,6 +178,19 @@ async function runRoslynAnalysis(
   try {
     // Ensure .NET SDK is available
     if (!await ensureDotNetSdk()) {
+      return { issues: [] };
+    }
+
+    // Check for .NET project
+    if (!await hasNetProject(repoPath)) {
+      core.warning('No .NET project found. Skipping Roslyn analysis.');
+      return { issues: [] };
+    }
+
+    // Find project directory
+    const projectDir = await findProjectDirectory(repoPath);
+    if (!projectDir) {
+      core.warning('Could not find project directory. Skipping Roslyn analysis.');
       return { issues: [] };
     }
 
@@ -240,6 +276,19 @@ async function runStyleCopAnalysis(
   try {
     // Ensure .NET SDK is available
     if (!await ensureDotNetSdk()) {
+      return { issues: [] };
+    }
+
+    // Check for .NET project
+    if (!await hasNetProject(repoPath)) {
+      core.warning('No .NET project found. Skipping StyleCop analysis.');
+      return { issues: [] };
+    }
+
+    // Find project directory
+    const projectDir = await findProjectDirectory(repoPath);
+    if (!projectDir) {
+      core.warning('Could not find project directory. Skipping StyleCop analysis.');
       return { issues: [] };
     }
 
@@ -351,6 +400,19 @@ async function runReSharperAnalysis(
   try {
     // Ensure .NET SDK is available
     if (!await ensureDotNetSdk()) {
+      return { issues: [] };
+    }
+
+    // Check for .NET project
+    if (!await hasNetProject(repoPath)) {
+      core.warning('No .NET project found. Skipping ReSharper analysis.');
+      return { issues: [] };
+    }
+
+    // Find project directory
+    const projectDir = await findProjectDirectory(repoPath);
+    if (!projectDir) {
+      core.warning('Could not find project directory. Skipping ReSharper analysis.');
       return { issues: [] };
     }
 

@@ -159,12 +159,50 @@ csharp_prefer_braces = true:suggestion`;
     });
 }
 exports.ensureEditorConfig = ensureEditorConfig;
+// Helper function to check if .NET project exists
+function hasNetProject(repoPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const files = fs.readdirSync(repoPath);
+            return files.some(file => file.endsWith('.csproj') || file.endsWith('.sln'));
+        }
+        catch (error) {
+            core.error(`Error checking for .NET project: ${error}`);
+            return false;
+        }
+    });
+}
+// Helper function to find project directory
+function findProjectDirectory(repoPath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const projectFile = fs.readdirSync(repoPath)
+                .find(file => file.endsWith('.csproj') || file.endsWith('.sln'));
+            return projectFile ? path.dirname(path.join(repoPath, projectFile)) : null;
+        }
+        catch (error) {
+            core.error(`Error finding project directory: ${error}`);
+            return null;
+        }
+    });
+}
 // Run Roslyn analysis
 function runRoslynAnalysis(repoPath, filePaths, config) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             // Ensure .NET SDK is available
             if (!(yield ensureDotNetSdk())) {
+                return { issues: [] };
+            }
+            // Check for .NET project
+            if (!(yield hasNetProject(repoPath))) {
+                core.warning('No .NET project found. Skipping Roslyn analysis.');
+                return { issues: [] };
+            }
+            // Find project directory
+            const projectDir = yield findProjectDirectory(repoPath);
+            if (!projectDir) {
+                core.warning('Could not find project directory. Skipping Roslyn analysis.');
                 return { issues: [] };
             }
             // Filter for C# files
@@ -237,6 +275,17 @@ function runStyleCopAnalysis(repoPath, filePaths, config) {
         try {
             // Ensure .NET SDK is available
             if (!(yield ensureDotNetSdk())) {
+                return { issues: [] };
+            }
+            // Check for .NET project
+            if (!(yield hasNetProject(repoPath))) {
+                core.warning('No .NET project found. Skipping StyleCop analysis.');
+                return { issues: [] };
+            }
+            // Find project directory
+            const projectDir = yield findProjectDirectory(repoPath);
+            if (!projectDir) {
+                core.warning('Could not find project directory. Skipping StyleCop analysis.');
                 return { issues: [] };
             }
             // Filter for C# files
@@ -335,6 +384,17 @@ function runReSharperAnalysis(repoPath, filePaths, config) {
         try {
             // Ensure .NET SDK is available
             if (!(yield ensureDotNetSdk())) {
+                return { issues: [] };
+            }
+            // Check for .NET project
+            if (!(yield hasNetProject(repoPath))) {
+                core.warning('No .NET project found. Skipping ReSharper analysis.');
+                return { issues: [] };
+            }
+            // Find project directory
+            const projectDir = yield findProjectDirectory(repoPath);
+            if (!projectDir) {
+                core.warning('Could not find project directory. Skipping ReSharper analysis.');
                 return { issues: [] };
             }
             // Filter for C# files

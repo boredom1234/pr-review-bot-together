@@ -16,39 +16,60 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Function to check file types
+      - name: Check file types
+        id: check-files
+        run: |
+          check_files() {
+            find . -type f -name "*.$1" | grep -q . && echo "true" || echo "false"
+          }
+          echo "has_js=$(check_files 'js' || check_files 'ts' || check_files 'jsx' || check_files 'tsx')" >> $GITHUB_OUTPUT
+          echo "has_py=$(check_files 'py')" >> $GITHUB_OUTPUT
+          echo "has_go=$(check_files 'go')" >> $GITHUB_OUTPUT
+          echo "has_java=$(check_files 'java')" >> $GITHUB_OUTPUT
+          echo "has_ruby=$(check_files 'rb')" >> $GITHUB_OUTPUT
+          echo "has_rust=$(check_files 'rs')" >> $GITHUB_OUTPUT
+          echo "has_dotnet=$(check_files 'cs' || check_files 'sln' || check_files 'csproj')" >> $GITHUB_OUTPUT
+
       # Setup Node.js for ESLint
       - name: Setup Node.js
+        if: steps.check-files.outputs.has_js == 'true'
         uses: actions/setup-node@v3
         with:
-          node-version: '16'
+          node-version: "16"
 
       # Setup Python for Pylint
       - name: Setup Python
+        if: steps.check-files.outputs.has_py == 'true'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       # Setup Go for Golint
       - name: Setup Go
+        if: steps.check-files.outputs.has_go == 'true'
         uses: actions/setup-go@v4
         with:
-          go-version: '1.x'
+          go-version: "1.x"
 
       # Setup Java for Checkstyle
       - name: Setup Java
+        if: steps.check-files.outputs.has_java == 'true'
         uses: actions/setup-java@v3
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "temurin"
+          java-version: "17"
 
       # Setup Ruby for RuboCop
       - name: Setup Ruby
+        if: steps.check-files.outputs.has_ruby == 'true'
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.0'
+          ruby-version: "3.0"
 
       # Setup Rust for Clippy
       - name: Setup Rust
+        if: steps.check-files.outputs.has_rust == 'true'
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -56,6 +77,7 @@ jobs:
 
       # Setup .NET
       - name: Setup .NET
+        if: steps.check-files.outputs.has_dotnet == 'true'
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: |
@@ -65,67 +87,82 @@ jobs:
       # Install quality tools
       - name: Install quality tools
         run: |
-          # Node.js tools
-          npm install -g eslint
+          if [[ "${{ steps.check-files.outputs.has_js }}" == "true" ]]; then
+            npm install -g eslint
+          fi
 
-          # Python tools
-          pip install pylint
+          if [[ "${{ steps.check-files.outputs.has_py }}" == "true" ]]; then
+            python -m pip install pylint
+          fi
 
-          # Go tools
-          go install golang.org/x/lint/golint@latest
+          if [[ "${{ steps.check-files.outputs.has_go }}" == "true" ]]; then
+            go install golang.org/x/lint/golint@latest
+          fi
 
-          # Ruby tools
-          gem install rubocop
+          if [[ "${{ steps.check-files.outputs.has_java }}" == "true" ]]; then
+            wget -q https://github.com/checkstyle/checkstyle/releases/download/checkstyle-10.3.3/checkstyle-10.3.3-all.jar
+          fi
 
-          # .NET tools
-          # Install global tools first
-          dotnet tool install -g JetBrains.ReSharper.GlobalTools
+          if [[ "${{ steps.check-files.outputs.has_ruby }}" == "true" ]]; then
+            gem install rubocop
+          fi
 
-          # Check if any .NET projects exist
-          if [ -n "$(find . -name '*.csproj' -o -name '*.sln')" ]; then
-            # Find the first .NET project directory
-            PROJECT_DIR=$(dirname $(find . -name '*.csproj' -o -name '*.sln' | head -n 1))
-            cd "$PROJECT_DIR"
-            
-            # Install analyzers at project level
-            dotnet add package StyleCop.Analyzers
-            dotnet add package Microsoft.CodeAnalysis.NetAnalyzers
-            dotnet add package Microsoft.CodeAnalysis.CSharp.CodeStyle
-            dotnet add package Roslynator.Analyzers
-          else
-            echo "No .NET projects found. Skipping analyzer package installation."
+          if [[ "${{ steps.check-files.outputs.has_rust }}" == "true" ]]; then
+            rustup component add clippy
+          fi
+
+          if [[ "${{ steps.check-files.outputs.has_dotnet }}" == "true" ]]; then
+            dotnet tool install -g JetBrains.ReSharper.GlobalTools
+            # Find project directory
+            PROJECT_DIR=$(find . -name "*.csproj" -o -name "*.sln" | head -n 1 | xargs dirname)
+            if [ ! -z "$PROJECT_DIR" ]; then
+              cd "$PROJECT_DIR"
+              dotnet add package Microsoft.CodeAnalysis.NetAnalyzers
+              dotnet add package StyleCop.Analyzers
+            fi
           fi
 
       # Create default configs
       - name: Create default configs
         run: |
-          # ESLint config
-          echo '{
-            "extends": "eslint:recommended",
-            "env": {
-              "node": true,
-              "es6": true
-            }
-          }' > .eslintrc.json
+          # Function to check if files with extension exist
+          check_files() {
+            find . -type f -name "*.$1" | grep -q .
+          }
 
-          # Pylint config
-          echo '[MESSAGES CONTROL]
-          disable=C0111,C0103' > .pylintrc
-
-          # .NET configs
-          echo "root = true
-
-          [*.{cs,vb}]
-          dotnet_analyzer_diagnostic.severity = warning" > .editorconfig
-
-          echo '{
-            "$schema": "https://raw.githubusercontent.com/DotNetAnalyzers/StyleCopAnalyzers/master/StyleCop.Analyzers/StyleCop.Analyzers/Settings/stylecop.schema.json",
-            "settings": {
-              "documentationRules": {
-                "companyName": "YourCompany"
+          # ESLint config (only if JS/TS files exist)
+          if check_files "js" || check_files "ts" || check_files "jsx" || check_files "tsx"; then
+            echo '{
+              "extends": "eslint:recommended",
+              "env": {
+                "node": true,
+                "es6": true
               }
-            }
-          }' > stylecop.json
+            }' > .eslintrc.json
+          fi
+
+          # Pylint config (only if Python files exist)
+          if check_files "py"; then
+            echo '[MESSAGES CONTROL]
+            disable=C0111,C0103' > .pylintrc
+          fi
+
+          # .NET configs (only if C# files exist)
+          if check_files "cs" || check_files "sln" || check_files "csproj"; then
+            echo "root = true
+
+            [*.{cs,vb}]
+            dotnet_analyzer_diagnostic.severity = warning" > .editorconfig
+
+            echo '{
+              "$schema": "https://raw.githubusercontent.com/DotNetAnalyzers/StyleCopAnalyzers/master/StyleCop.Analyzers/StyleCop.Analyzers/Settings/stylecop.schema.json",
+              "settings": {
+                "documentationRules": {
+                  "companyName": "YourCompany"
+                }
+              }
+            }' > stylecop.json
+          fi
 
       # Cache dependencies
       - name: Cache dependencies

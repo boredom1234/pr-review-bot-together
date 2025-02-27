@@ -398,24 +398,20 @@ function createPrompt(
 
   return `You are a strict code reviewer. Your task is to thoroughly analyze the code and find potential issues, bugs, and improvements. Instructions:
 
-- IMPORTANT: Your response MUST be in the following JSON format with NO extra text or markdown formatting:
-  {"reviews":[{"lineNumber":123,"reviewComment":"Your comment here","severity":"critical|warning|suggestion"}]}
-
+- Provide the response in following JSON format with no extra text or formatting: {"reviews":[{"lineNumber":123,"reviewComment":"Your comment here","severity":"critical|warning|suggestion"}]}
 - Severity levels:
   - "critical": For issues that must be fixed (security issues, bugs, broken functionality, performance issues)
   - "warning": For code quality issues that should be addressed (maintainability, best practices, potential edge cases)
   - "suggestion": For optional improvements (readability, minor optimizations)
-
 - Be thorough and strict in your review:
   - Look for security vulnerabilities
   - Check for potential bugs and edge cases
   - Identify performance issues
   - Verify error handling
   - Check for code quality and maintainability issues
-
 - Do not give positive comments or compliments
 - Always try to find at least one issue to improve the code
-- IMPORTANT: Your response must be ONLY valid JSON - no markdown, no extra text, no code blocks
+- Keep your response as valid JSON only - no markdown, no extra text
 
 Review the following code diff in the file "${
     file.to
@@ -463,7 +459,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
         {
           role: "system",
           content:
-            "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review. EXTREMELY IMPORTANT: Your response must be ONLY valid JSON without any markdown formatting or additional text. Do not include any explanations, markdown formatting, or code blocks. The exact format must be: {\"reviews\":[{\"lineNumber\":123,\"reviewComment\":\"Your comment here\",\"severity\":\"critical|warning|suggestion\"}]}",
+            "You are a strict code reviewer who always finds potential issues and improvements. Be thorough and critical in your review. IMPORTANT: Your response must be ONLY valid JSON without any markdown formatting or additional text. The exact format should be: {\"reviews\":[{\"lineNumber\":123,\"reviewComment\":\"Your comment here\",\"severity\":\"critical|warning|suggestion\"}]}",
         },
         {
           role: "user",
@@ -474,13 +470,10 @@ async function getAIResponse(prompt: string): Promise<Array<{
 
     console.log("Received response from AI model");
     const res = response.choices[0].message?.content?.trim() || "{}";
-    console.log("Raw AI response:", res.substring(0, 200) + "...");
-    
     try {
       // Remove any markdown formatting that might be present
       let cleanJson = res
-        .replace(/```json\n/g, "")
-        .replace(/```\n/g, "")
+        .replace(/```[a-z]*\n/g, "")
         .replace(/```/g, "")
         .trim();
       
@@ -502,9 +495,6 @@ async function getAIResponse(prompt: string): Promise<Array<{
         
         // Replace any potential line breaks within strings
         cleanJson = cleanJson.replace(/("(?:\\.|[^"\\])*"):(\s*)"((?:\\.|[^"\\])*)(?:\n|\r\n?)((?:\\.|[^"\\])*)"/g, '$1:$2"$3 $4"');
-        
-        // Fix escaped quotes within strings
-        cleanJson = cleanJson.replace(/\\"/g, '"').replace(/"([^"]*)""/g, '"$1\\"');
         
         // Try to parse again
         try {
@@ -576,34 +566,9 @@ async function getAIResponse(prompt: string): Promise<Array<{
             }
           }
           
-          if (manualReviews.length > 0) {
-            console.log(`Extracted ${manualReviews.length} reviews using regex`);
-            return manualReviews;
-          }
-          
-          // If we still couldn't extract reviews, try one more approach
-          // Look for patterns like "Line 123: This is a comment"
-          const lineCommentPattern = /Line\s+(\d+):\s+(.*?)(?=Line\s+\d+:|$)/g;
-          const lineCommentMatches = [];
-          let match;
-          while ((match = lineCommentPattern.exec(res)) !== null) {
-            lineCommentMatches.push(match);
-          }
-          
-          if (lineCommentMatches.length > 0) {
-            console.log("Extracting reviews from line comment format");
-            const lineCommentReviews = lineCommentMatches.map(match => ({
-              lineNumber: match[1],
-              reviewComment: match[2].trim(),
-              severity: "warning" as const
-            }));
-            
-            console.log(`Extracted ${lineCommentReviews.length} reviews from line comment format`);
-            return lineCommentReviews;
-          }
+          return manualReviews;
         }
         
-        console.log("All parsing attempts failed, returning empty array");
         return [];
       }
       
@@ -768,60 +733,22 @@ async function createReviewComment(
       detailedSummary += `\n${qualityMetricsMarkdown}\n`;
     }
 
-    // Prepare review comments for GitHub API
-    // Remove any metadata tags from the body before posting to GitHub
     const reviewComments = comments.map((comment) => ({
       body: `${getSeverityEmoji(
         comment.severity
-      )} [${comment.severity.toUpperCase()}] ${comment.body.replace(/<!--.*?-->/g, "")}`,
+      )} [${comment.severity.toUpperCase()}] ${comment.body}`,
       path: comment.path,
       line: comment.line,
     }));
 
-    console.log(`Submitting review with ${reviewComments.length} comments`);
-    
-    // Log the first few comments for debugging
-    if (reviewComments.length > 0) {
-      console.log("Sample comments:");
-      reviewComments.slice(0, 3).forEach((comment, i) => {
-        console.log(`Comment ${i+1}:`, JSON.stringify({
-          path: comment.path,
-          line: comment.line,
-          body_preview: comment.body.substring(0, 100) + "..."
-        }));
-      });
-    }
-
-    try {
-      // First try to create a review with inline comments
-      await octokit.pulls.createReview({
-        owner,
-        repo,
-        pull_number,
-        comments: reviewComments,
-        event,
-        body: detailedSummary,
-      });
-      console.log("Successfully submitted review with inline comments");
-    } catch (reviewError) {
-      console.error("Error creating review with comments:", reviewError);
-      
-      // If creating a review with comments fails, try to create just a review comment
-      try {
-        console.log("Attempting to create review without inline comments");
-        await octokit.pulls.createReview({
-          owner,
-          repo,
-          pull_number,
-          event,
-          body: detailedSummary,
-        });
-        console.log("Successfully submitted review without inline comments");
-      } catch (fallbackError) {
-        console.error("Error creating fallback review:", fallbackError);
-        throw fallbackError;
-      }
-    }
+    await octokit.pulls.createReview({
+      owner,
+      repo,
+      pull_number,
+      comments: reviewComments,
+      event,
+      body: detailedSummary,
+    });
   } catch (error: unknown) {
     console.error("Error submitting review:", error);
     if (error instanceof Error) {
@@ -1172,4 +1099,3 @@ main().catch((error) => {
   console.error("Error:", error);
   process.exit(1);
 });
-

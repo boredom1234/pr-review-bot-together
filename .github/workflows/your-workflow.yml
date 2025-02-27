@@ -114,11 +114,14 @@ jobs:
           if [[ "${{ steps.check-files.outputs.has_dotnet }}" == "true" ]]; then
             dotnet tool install -g JetBrains.ReSharper.GlobalTools
             # Find project directory
-            PROJECT_DIR=$(find . -name "*.csproj" -o -name "*.sln" | head -n 1 | xargs dirname)
-            if [ ! -z "$PROJECT_DIR" ]; then
+            PROJECT_FILE=$(find . -name "*.csproj" -o -name "*.sln" | head -n 1)
+            if [ ! -z "$PROJECT_FILE" ]; then
+              PROJECT_DIR=$(dirname "$PROJECT_FILE")
               cd "$PROJECT_DIR"
               dotnet add package Microsoft.CodeAnalysis.NetAnalyzers
               dotnet add package StyleCop.Analyzers
+            else
+              echo "No .NET project files found. Skipping analyzer package installation."
             fi
           fi
 
